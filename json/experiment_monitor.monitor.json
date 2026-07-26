@@ -1,0 +1,238 @@
+{
+  "$schema": "../schemas/lsl-monitor.schema.json",
+  "window": {
+    "title": "My LSL monitor",
+    "history_seconds": 10.0,
+    "refresh_hz": 20,
+    "columns": 1,
+    "inactive_after_seconds": 2,
+    "max_points_per_channel": 100000
+  },
+  "streams": [
+    {
+      "id": "XtrodesEMG",
+      "match": {
+        "name": "XtrodesEMG",
+        "type": "Signals",
+        "source_id": "XtrodesEMG"
+      },
+      "channels": [
+        {
+          "index": 0,
+          "label": "Channel 1",
+          "color": "#5eead4"
+        },
+        {
+          "index": 1,
+          "label": "Channel 2",
+          "color": "#60a5fa"
+        },
+        {
+          "index": 2,
+          "label": "Channel 3",
+          "color": "#f472b6"
+        },
+        {
+          "index": 3,
+          "label": "Channel 4",
+          "color": "#facc15"
+        },
+        {
+          "index": 4,
+          "label": "Channel 5",
+          "color": "#c084fc"
+        },
+        {
+          "index": 5,
+          "label": "Channel 6",
+          "color": "#fb923c"
+        },
+        {
+          "index": 6,
+          "label": "Channel 7",
+          "color": "#5eead4"
+        },
+        {
+          "index": 7,
+          "label": "Channel 8",
+          "color": "#60a5fa"
+        },
+        {
+          "index": 8,
+          "label": "Channel 9",
+          "color": "#f472b6"
+        },
+        {
+          "index": 9,
+          "label": "Channel 10",
+          "color": "#facc15"
+        },
+        {
+          "index": 10,
+          "label": "Channel 11",
+          "color": "#c084fc"
+        },
+        {
+          "index": 11,
+          "label": "Channel 12",
+          "color": "#fb923c"
+        },
+        {
+          "index": 12,
+          "label": "Channel 13",
+          "color": "#5eead4"
+        },
+        {
+          "index": 13,
+          "label": "Channel 14",
+          "color": "#60a5fa"
+        },
+        {
+          "index": 14,
+          "label": "Channel 15",
+          "color": "#f472b6"
+        },
+        {
+          "index": 15,
+          "label": "Channel 16",
+          "color": "#facc15"
+        }
+      ],
+      "views": [
+        {
+          "type": "traces",
+          "layout": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 0.533,
+            "height": 0.539
+          },
+          "title": "Signal traces",
+          "alignment": "stacked",
+          "channels": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15
+          ]
+        }
+      ]
+    },
+    {
+      "id": "XtrodesIMU",
+      "match": {
+        "name": "XtrodesIMU",
+        "type": "Markers",
+        "source_id": "XtrodesIMU"
+      },
+      "channels": [
+        {
+          "name": "Acc X",
+          "label": "Acc X",
+          "color": "#5eead4"
+        },
+        {
+          "name": "Acc Y",
+          "label": "Acc Y",
+          "color": "#60a5fa"
+        },
+        {
+          "name": "Acc Z",
+          "label": "Acc Z",
+          "color": "#f472b6"
+        },
+        {
+          "name": "Gyro X",
+          "label": "Gyro X",
+          "color": "#facc15"
+        },
+        {
+          "name": "Gyro Y",
+          "label": "Gyro Y",
+          "color": "#c084fc"
+        },
+        {
+          "name": "Gyro Z",
+          "label": "Gyro Z",
+          "color": "#fb923c"
+        }
+      ],
+      "views": [
+        {
+          "type": "traces",
+          "title": "Signal traces",
+          "alignment": "stacked",
+          "layout": {
+            "x": 0.0,
+            "y": 0.535,
+            "width": 0.532,
+            "height": 0.203
+          }
+        }
+      ]
+    },
+    {
+      "id": "MotorControlCursor",
+      "match": {
+        "name": "MotorControlCursor",
+        "type": "MotorControlCursor",
+        "source_id": "MotorControlCursor"
+      },
+      "channels": [
+        {
+          "name": "raw_x",
+          "label": "rax_x",
+          "color": "#5eead4"
+        },
+        {
+          "name": "raw_y",
+          "label": "raw_y",
+          "color": "#60a5fa"
+        }
+      ],
+      "views": [
+        {
+          "type": "plane_2d",
+          "title": "2D plane",
+          "layout": {
+            "x": 0.53,
+            "y": 0.0,
+            "width": 0.235,
+            "height": 0.334
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_1",
+      "match": {
+        "type": "Signals"
+      },
+      "channels": [
+        {
+          "index": 0,
+          "label": "Channel 1",
+          "color": "#5eead4"
+        }
+      ],
+      "views": [
+        {
+          "type": "alive",
+          "title": "Stream health"
+        }
+      ]
+    }
+  ]
+}

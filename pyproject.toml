@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lsl-monitor"
+version = "0.1.0"
+description = "JSON-configured real-time monitor for Lab Streaming Layer signals"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "jsonschema>=4.22",
+  "numpy>=1.26",
+  "pylsl>=1.16",
+  "pyqtgraph>=0.13.7",
+  "PySide6>=6.7",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.2",
+  "ruff>=0.5",
+]
+
+[project.scripts]
+lsl-monitor = "lsl_monitor.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lsl_monitor"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"schemas/lsl-monitor.schema.json" = "lsl_monitor/schemas/lsl-monitor.schema.json"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

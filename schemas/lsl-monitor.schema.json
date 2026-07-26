@@ -1,0 +1,293 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/lsl-monitor.schema.json",
+  "title": "LSL Monitor configuration",
+  "description": "Selects LSL streams, channels, views, and responsive window settings.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["streams"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "window": {
+      "$ref": "#/$defs/window"
+    },
+    "streams": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/stream"
+      }
+    }
+  },
+  "$defs": {
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "history_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 3600,
+          "default": 10
+        },
+        "refresh_hz": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 120,
+          "default": 20
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 2
+        },
+        "inactive_after_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 60,
+          "default": 2
+        },
+        "max_points_per_channel": {
+          "type": "integer",
+          "minimum": 512,
+          "maximum": 10000000,
+          "default": 100000
+        }
+      }
+    },
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name_regex": {
+          "type": "string",
+          "minLength": 1,
+          "format": "regex"
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "channel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Zero-based channel index in the LSL sample."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Channel label from the LSL StreamInfo metadata."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional display label."
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["index"],
+          "not": {
+            "required": ["name"]
+          }
+        },
+        {
+          "required": ["name"],
+          "not": {
+            "required": ["index"]
+          }
+        }
+      ]
+    },
+    "channel_reference": {
+      "description": "A configured channel's raw index, metadata name, or display label.",
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ]
+    },
+    "panel_layout": {
+      "description": "Responsive panel rectangle expressed as fractions of the window.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": ["traces", "plane_2d", "psd", "alive", "markers"]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Panel heading; defaults to the view type. The stream id is always shown beside it."
+        },
+        "channels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/channel_reference"
+          }
+        },
+        "status_dot": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the green/red stream-activity dot in this panel's title row."
+        },
+        "alignment": {
+          "enum": ["stacked", "overlay"],
+          "default": "stacked"
+        },
+        "fft_size": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 1048576,
+          "default": 1024
+        },
+        "frequency_range": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "marker_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 3600,
+          "description": "Rolling window of the markers panel; defaults to window.history_seconds."
+        },
+        "marker_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 48,
+          "description": "Marker rows drawn by the markers panel; older events are counted only."
+        },
+        "trail_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 3600,
+          "description": "Trajectory length of the plane_2d panel; defaults to window.history_seconds."
+        },
+        "layout": {
+          "$ref": "#/$defs/panel_layout"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "plane_2d"
+              }
+            },
+            "required": ["type", "channels"]
+          },
+          "then": {
+            "properties": {
+              "channels": {
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          }
+        }
+      ]
+    },
+    "stream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "match", "channels", "views"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+        },
+        "match": {
+          "$ref": "#/$defs/match"
+        },
+        "channels": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/channel"
+          }
+        },
+        "views": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/view"
+          }
+        }
+      }
+    }
+  }
+}
