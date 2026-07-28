@@ -36,8 +36,12 @@ The right side is a live preview using generated mock signals. Drag a panel by
 its title and resize it using the lower-right handle. Placement and size are
 stored as percentages, so the composition scales with the monitor window.
 Numeric percentage controls and a per-panel automatic-layout reset are also
-available. The designer supports traces, 2D planes, PSD plots, and active-state
-panels.
+available. **Fit to Screen** arranges all panels across the existing window and
+proportionally stretches the existing column widths, row heights, positions, and
+gaps until the layout reaches every window edge. Nested groups are fitted
+recursively, so a short row inside one column can fill that column without
+changing the proportions of neighboring columns. The designer supports traces,
+2D planes, PSD plots, and active-state panels.
 
 **Channel order** is set by dragging, at two levels:
 
@@ -52,6 +56,10 @@ panels.
 
 The resulting order is what the panel draws, so it is also the top-to-bottom
 lane order of a stacked trace panel and the legend order elsewhere.
+
+**LSL name / source ID** is one shared designer field. Its value is written to
+the single JSON `identity` property, which requires the outlet to advertise that
+value as both its LSL `name` and `source_id`. The monitor ID remains separate.
 
 **Preview signal** switches the mock waveform driving the selected stream, so a
 layout can be checked against the kind of data it will show: `Sine mix`,
@@ -68,7 +76,7 @@ meta-data conventions (`EEG`, `MEG`, `ECoG`, `EMG`, `ECG`, `EOG`, `EDA`, `GSR`,
 `Mouse`, `Markers`, `Signals`, `Control`). LSL itself puts no constraint on the
 type an outlet advertises, so the field stays editable: type any other string to
 match a custom outlet, or select the empty first entry to drop the rule and match
-on `name` or `source_id` alone.
+on `identity` alone.
 
 Use **Save as** to export a schema-valid `.monitor.json`. Mock waveforms are
 preview-only and are not written to the configuration: the exported stream match
@@ -103,9 +111,17 @@ completion and validation.
 
 Each stream has:
 
-- `id`: a unique dashboard identifier.
-- `match`: one or more exact `name`, `type`, or `source_id` fields, plus optional
-  `name_regex`. All supplied rules must match.
+- `id`: an internal dashboard identifier. It must be unique within this JSON
+  configuration, but it does not need to equal any LSL field.
+- `match`: one or more LSL outlet fields. `identity` is the shared value expected
+  in both the outlet's human-readable `name` and stable producer `source_id`; it
+  is independent of the dashboard `id`. It may be combined with `type` and an
+  optional `hostname`. If an outlet appends its computer name to its identity,
+  the monitor selects the closest suffix match automatically. When equally close
+  outlets exist on multiple computers, the running monitor asks which full
+  outlet belongs to this experiment; the JSON remains portable between
+  computers. Legacy configurations using separate `name`, `source_id`, or
+  `name_regex` rules remain supported.
 - `channels`: the relevant channels selected by zero-based `index` or exact LSL
   metadata `name`. `label` and `color` customize display.
 - `views`: the panels for the stream. A view can select a subset by raw channel
@@ -139,6 +155,44 @@ uv run lsl-monitor json/example.monitor.json
 The process is a read-only LSL consumer. It does not create an outlet or write a
 recording. A stream is green only after samples arrive within
 `inactive_after_seconds`; merely discovering an outlet is not enough.
+
+The repository-level `lsl_api.cfg` keeps LSL on IPv4 and adds the portable
+loopback address as a known peer. This makes same-PC demo outlets connect
+reliably on Windows while retaining normal multicast discovery for streams
+hosted by other PCs. Run the producer and monitor from the repository root so
+liblsl loads this configuration.
+
+## Full experiment demo
+
+The repository includes a live mock producer for
+`json/experiment_monitor_full.json`. It publishes all eight outlets expected by
+that configuration: EMG, IMU, cursor position, three camera-health signals, and
+two marker streams.
+
+Start the mock experiment in one terminal:
+
+```powershell
+uv run lsl-monitor-demo
+```
+
+Then start the monitor in a second terminal:
+
+```powershell
+uv run lsl-monitor json/experiment_monitor_full.json
+```
+
+The traces and 2D cursor animate continuously, and both marker panels receive
+named events. By default camera 2 pauses for four seconds during every
+16-second cycle. Because the monitor marks a stream inactive after two seconds,
+its health panel turns red and then returns to green when samples resume. Run
+without simulated dropouts using:
+
+```powershell
+uv run lsl-monitor-demo --fault-cycle-seconds 0
+```
+
+For a timed smoke test, pass `--duration 10`. The equivalent checkout-local
+launcher is `uv run python scripts/run_mock_experiment.py`.
 
 ## Development
 

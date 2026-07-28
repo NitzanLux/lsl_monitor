@@ -91,6 +91,7 @@ def test_designer_switches_the_preview_signal_model_per_stream() -> None:
     application.processEvents()
 
     assert window.stream_models == [DEFAULT_MOCK_MODEL, "spikes"]
+    assert window.document["streams"][1]["match"]["identity"] == "stream_1"
     assert window.preview.model_for_stream(1) == "spikes"
     assert window.preview.model_for_stream(0) == DEFAULT_MOCK_MODEL
 
@@ -123,6 +124,22 @@ def test_designer_stream_type_is_a_scrollable_editable_picker() -> None:
     combo.setCurrentIndex(0)
     application.processEvents()
     assert "type" not in window.document["streams"][0]["match"]
+    window.close()
+
+
+def test_designer_uses_one_json_identity_for_lsl_name_and_source_id() -> None:
+    application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = DesignerWindow(new_document())
+    window.show()
+    application.processEvents()
+
+    window.stream_identity_edit.setText("shared-stream-id")
+    application.processEvents()
+
+    match = window.document["streams"][0]["match"]
+    assert match["identity"] == "shared-stream-id"
+    assert "name" not in match
+    assert "source_id" not in match
     window.close()
 
 
@@ -297,5 +314,25 @@ def test_designer_materializes_all_panels_when_one_is_dragged() -> None:
     views = window.document["streams"][0]["views"]
     assert views[0]["layout"]["x"] > 0
     assert "layout" in views[1]
+    assert window.custom_layout_check.isChecked()
+    window.close()
+
+
+def test_fit_to_screen_button_evenly_fills_the_existing_window() -> None:
+    application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    document = new_document()
+    views = document["streams"][0]["views"]
+    views[0]["layout"] = {"x": 0.1, "y": 0.2, "width": 0.2, "height": 0.3}
+    views[1]["layout"] = {"x": 0.3, "y": 0.2, "width": 0.3, "height": 0.3}
+    window = DesignerWindow(document)
+    window.show()
+    application.processEvents()
+
+    window.fit_to_screen_button.click()
+    application.processEvents()
+
+    layouts = [view["layout"] for view in window.document["streams"][0]["views"]]
+    assert layouts[0] == {"x": 0.0, "y": 0.0, "width": 0.4, "height": 1.0}
+    assert layouts[1] == {"x": 0.4, "y": 0.0, "width": 0.6, "height": 1.0}
     assert window.custom_layout_check.isChecked()
     window.close()

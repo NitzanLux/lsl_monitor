@@ -12,7 +12,7 @@
     {
       "id": "emg",
       "match": {
-        "name_regex": "(?i)emg",
+        "identity": "EMG",
         "type": "EMG"
       },
       "channels": [
@@ -84,6 +84,7 @@
     {
       "id": "markers",
       "match": {
+        "identity": "Markers",
         "type": "Markers"
       },
       "channels": [

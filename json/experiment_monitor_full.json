@@ -10,7 +10,7 @@
   },
   "streams": [
     {
-      "id": "xtrodes_emg",
+      "id": "XtrodesEMG",
       "match": {
         "identity": "XtrodesEMG",
         "type": "Signals"
@@ -103,8 +103,8 @@
           "layout": {
             "x": 0.0,
             "y": 0.0,
-            "width": 0.533,
-            "height": 0.539
+            "width": 0.6941,
+            "height": 0.5696
           },
           "title": "Signal traces",
           "alignment": "stacked",
@@ -130,7 +130,7 @@
       ]
     },
     {
-      "id": "xtrodes_imu",
+      "id": "XtrodesIMU",
       "match": {
         "identity": "XtrodesIMU",
         "type": "Markers"
@@ -174,15 +174,15 @@
           "alignment": "stacked",
           "layout": {
             "x": 0.0,
-            "y": 0.535,
-            "width": 0.532,
-            "height": 0.203
+            "y": 0.5654,
+            "width": 0.6941,
+            "height": 0.2145
           }
         }
       ]
     },
     {
-      "id": "motor_cursor",
+      "id": "MotorControlCursor",
       "match": {
         "identity": "MotorControlCursor",
         "type": "MotorControlCursor"
@@ -204,16 +204,16 @@
           "type": "plane_2d",
           "title": "2D plane",
           "layout": {
-            "x": 0.533,
+            "x": 0.6941,
             "y": 0.0,
-            "width": 0.2349,
+            "width": 0.3059,
             "height": 0.3341
           }
         }
       ]
     },
     {
-      "id": "camera_0",
+      "id": "FemtoBolt_cam0_CL8E751007P",
       "match": {
         "identity": "FemtoBolt_cam0_CL8E751007P",
         "type": "FemtoBolt_cam0_CL8E751007P"
@@ -230,16 +230,16 @@
           "type": "alive",
           "title": "Stream health",
           "layout": {
-            "x": 0.142,
-            "y": 0.733,
-            "width": 0.14,
-            "height": 0.209
+            "x": 0.2323,
+            "y": 0.7747,
+            "width": 0.2301,
+            "height": 0.2253
           }
         }
       ]
     },
     {
-      "id": "camera_2",
+      "id": "FemtoBolt_cam2_CL8E751008M",
       "match": {
         "identity": "FemtoBolt_cam2_CL8E751008M",
         "type": "Control"
@@ -256,16 +256,16 @@
           "type": "alive",
           "title": "Stream health",
           "layout": {
-            "x": 0.0007,
-            "y": 0.7368,
-            "width": 0.1396,
-            "height": 0.2094
+            "x": 0.0,
+            "y": 0.7747,
+            "width": 0.2295,
+            "height": 0.2253
           }
         }
       ]
     },
     {
-      "id": "camera_1",
+      "id": "FemtoBolt_cam1_CL8E7510041",
       "match": {
         "identity": "FemtoBolt_cam1_CL8E7510041",
         "type": "FemtoBolt_cam1_CL8E7510041"
@@ -282,16 +282,16 @@
           "type": "alive",
           "title": "Stream health",
           "layout": {
-            "x": 0.283,
-            "y": 0.733,
-            "width": 0.14,
-            "height": 0.209
+            "x": 0.464,
+            "y": 0.7747,
+            "width": 0.2301,
+            "height": 0.2253
           }
         }
       ]
     },
     {
-      "id": "motor_markers",
+      "id": "MotorControlMarker",
       "match": {
         "identity": "MotorControlMarker",
         "type": "Markers"
@@ -311,16 +311,16 @@
             0
           ],
           "layout": {
-            "x": 0.5344,
+            "x": 0.6941,
             "y": 0.3364,
-            "width": 0.2328,
+            "width": 0.3059,
             "height": 0.4005
           }
         }
       ]
     },
     {
-      "id": "camera_events",
+      "id": "FemtoBoltEvents",
       "match": {
         "identity": "FemtoBoltEvents",
         "type": "Markers"
@@ -340,9 +340,9 @@
             0
           ],
           "layout": {
-            "x": 0.5351,
+            "x": 0.6941,
             "y": 0.7368,
-            "width": 0.2314,
+            "width": 0.3059,
             "height": 0.2632
           }
         }

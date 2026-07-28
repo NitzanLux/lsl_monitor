@@ -23,7 +23,7 @@ from lsl_monitor.config import (
     default_schema_path,
     monitor_config_from_document,
 )
-from lsl_monitor.layout import PanelCanvas, RelativeRect
+from lsl_monitor.layout import PanelCanvas, RelativeRect, stretched_rectangles
 from lsl_monitor.mock import (
     DEFAULT_MOCK_MODEL,
     MOCK_MODELS,
@@ -125,7 +125,7 @@ def new_document() -> Document:
         "streams": [
             {
                 "id": "mock_stream",
-                "match": {"name": "My stream", "type": "Signals"},
+                "match": {"identity": "My stream", "type": "Signals"},
                 "channels": [
                     {"index": 0, "label": "Channel 1", "color": DEFAULT_COLORS[0]},
                     {"index": 1, "label": "Channel 2", "color": DEFAULT_COLORS[1]},
@@ -540,6 +540,12 @@ class DesignerWindow(QtWidgets.QMainWindow):
         preview_title.setObjectName("sectionHeading")
         header_row.addWidget(preview_title)
         header_row.addStretch(1)
+        self.fit_to_screen_button = QtWidgets.QPushButton("Fit to Screen")
+        self.fit_to_screen_button.setToolTip(
+            "Proportionally stretch the existing layout to fill the monitor window"
+        )
+        self.fit_to_screen_button.clicked.connect(self._fit_to_screen)
+        header_row.addWidget(self.fit_to_screen_button)
         self.validation_status = QtWidgets.QLabel()
         self.validation_status.setObjectName("validationStatus")
         header_row.addWidget(self.validation_status)
@@ -623,20 +629,30 @@ class DesignerWindow(QtWidgets.QMainWindow):
         layout.addLayout(model_row)
         form = QtWidgets.QFormLayout()
         self.stream_id_edit = QtWidgets.QLineEdit()
-        self.stream_name_edit = QtWidgets.QLineEdit()
+        self.stream_identity_edit = QtWidgets.QLineEdit()
         self.stream_type_combo = self._stream_type_combo()
-        self.source_id_edit = QtWidgets.QLineEdit()
-        self.stream_id_edit.setPlaceholderText("eeg")
-        self.stream_name_edit.setPlaceholderText("Optional exact LSL name")
-        self.source_id_edit.setPlaceholderText("Optional source_id")
-        self._form_row(form, "Configuration ID", self.stream_id_edit)
-        self._form_row(form, "LSL name", self.stream_name_edit)
+        self.hostname_edit = QtWidgets.QLineEdit()
+        self.stream_id_edit.setPlaceholderText("internal_eeg")
+        self.stream_identity_edit.setPlaceholderText("Exact LSL name and source_id")
+        self.hostname_edit.setPlaceholderText("Optional computer name")
+        self.stream_id_edit.setToolTip(
+            "Unique internal ID used by this dashboard; it is not an LSL field"
+        )
+        self.stream_identity_edit.setToolTip(
+            "The shared value expected in both the outlet name and source_id"
+        )
+        self.hostname_edit.setToolTip(
+            "Exact outlet computer name; use this only to select among duplicates"
+        )
+        self._form_row(form, "Monitor ID", self.stream_id_edit)
+        self._form_row(form, "LSL name / source ID", self.stream_identity_edit)
         self._form_row(form, "LSL type", self.stream_type_combo)
-        self._form_row(form, "LSL source ID", self.source_id_edit)
+        self._form_row(form, "LSL hostname", self.hostname_edit)
         layout.addLayout(form)
         match_help = QtWidgets.QLabel(
-            "The preview signal is mocked and is not saved. These match fields are "
-            "used later to find the real outlet."
+            "Monitor ID is unique only inside this configuration. The shared LSL "
+            "identity is matched against both the outlet name and source ID. The "
+            "preview signal is mocked and is not saved."
         )
         match_help.setObjectName("helpText")
         match_help.setWordWrap(True)
@@ -649,8 +665,8 @@ class DesignerWindow(QtWidgets.QMainWindow):
         remove_button.clicked.connect(self._remove_stream)
         for edit in (
             self.stream_id_edit,
-            self.stream_name_edit,
-            self.source_id_edit,
+            self.stream_identity_edit,
+            self.hostname_edit,
         ):
             edit.textChanged.connect(self._stream_changed)
 
@@ -955,9 +971,14 @@ class DesignerWindow(QtWidgets.QMainWindow):
             max(0, self.model_combo.findData(self._model_for_stream(index)))
         )
         self.stream_id_edit.setText(stream["id"])
-        self.stream_name_edit.setText(stream["match"].get("name", ""))
+        self.stream_identity_edit.setText(
+            stream["match"].get(
+                "identity",
+                stream["match"].get("source_id", stream["match"].get("name", "")),
+            )
+        )
         self.stream_type_combo.setCurrentText(stream["match"].get("type", ""))
-        self.source_id_edit.setText(stream["match"].get("source_id", ""))
+        self.hostname_edit.setText(stream["match"].get("hostname", ""))
         self._populate_channel_table(stream)
         self._rebuild_view_list()
         self._loading = False
@@ -987,12 +1008,13 @@ class DesignerWindow(QtWidgets.QMainWindow):
         if stream is None:
             return
         stream["id"] = self.stream_id_edit.text().strip()
+        identity = self.stream_identity_edit.text().strip()
         match = {
             key: value
             for key, value in (
-                ("name", self.stream_name_edit.text().strip()),
+                ("identity", identity),
                 ("type", self.stream_type_combo.currentText().strip()),
-                ("source_id", self.source_id_edit.text().strip()),
+                ("hostname", self.hostname_edit.text().strip()),
             )
             if value
         }
@@ -1018,7 +1040,7 @@ class DesignerWindow(QtWidgets.QMainWindow):
             number += 1
         stream = {
             "id": f"stream_{number}",
-            "match": {"type": "Signals"},
+            "match": {"identity": f"stream_{number}", "type": "Signals"},
             "channels": [
                 {"index": 0, "label": "Channel 1", "color": DEFAULT_COLORS[0]}
             ],
@@ -1343,6 +1365,26 @@ class DesignerWindow(QtWidgets.QMainWindow):
             self.document["streams"][stream_index]["views"][view_index]["layout"] = (
                 rectangle.as_document()
             )
+
+    @QtCore.Slot()
+    def _fit_to_screen(self) -> None:
+        """Proportionally stretch the current layout to every window edge."""
+
+        current_layouts = self.preview.current_layouts()
+        fitted = stretched_rectangles(
+            [rectangle for _, rectangle in current_layouts]
+        )
+        for (path, _), rectangle in zip(current_layouts, fitted, strict=True):
+            stream_index, view_index = path
+            self.document["streams"][stream_index]["views"][view_index]["layout"] = (
+                rectangle.as_document()
+            )
+
+        self._preview_timer.stop()
+        self._refresh_preview()
+        current_row = self.view_list.currentRow()
+        if current_row >= 0:
+            self._load_view(current_row)
 
     @QtCore.Slot(bool)
     def _layout_mode_changed(self, checked: bool) -> None:

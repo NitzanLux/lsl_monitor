@@ -1,20 +1,26 @@
 import threading
 import time
 
-from lsl_monitor.config import ChannelConfig, StreamConfig
+import pytest
+
+from lsl_monitor.config import ChannelConfig, ConfigError, StreamConfig
 from lsl_monitor.lsl import (
     LSLStreamWorker,
     is_marker_stream,
     read_channel_labels,
+    select_stream,
     stream_matches,
 )
 
 
 class FakeInfo:
-    def __init__(self, name: str, stream_type: str, source_id: str) -> None:
+    def __init__(
+        self, name: str, stream_type: str, source_id: str, hostname: str = ""
+    ) -> None:
         self._name = name
         self._type = stream_type
         self._source_id = source_id
+        self._hostname = hostname
 
     def name(self) -> str:
         return self._name
@@ -24,6 +30,9 @@ class FakeInfo:
 
     def source_id(self) -> str:
         return self._source_id
+
+    def hostname(self) -> str:
+        return self._hostname
 
 
 class BrokenDescription:
@@ -44,6 +53,73 @@ def test_stream_matching_combines_exact_and_regex_rules() -> None:
     assert not stream_matches(info, {"source_id": "amp-2"})
 
 
+def test_stream_matching_checks_merged_identity_against_both_lsl_fields() -> None:
+    matching = FakeInfo("amp-1", "EMG", "amp-1")
+    different_source = FakeInfo("amp-1", "EMG", "device-1")
+
+    assert stream_matches(matching, {"identity": "amp-1"})
+    assert not stream_matches(different_source, {"identity": "amp-1"})
+
+
+def test_selector_accepts_machine_suffix_and_prefers_closest_name() -> None:
+    streams = [
+        FakeInfo("XtrodesEMG-lab-pc", "Signals", "XtrodesEMG-lab-pc", "lab-pc"),
+        FakeInfo("UnrelatedEMG", "Signals", "other", "other-pc"),
+    ]
+
+    selected = select_stream(
+        streams,
+        {"name": "XtrodesEMG", "type": "Signals", "source_id": "XtrodesEMG"},
+    )
+
+    assert selected is streams[0]
+
+
+def test_selector_requires_hostname_for_duplicate_closest_streams() -> None:
+    streams = [
+        FakeInfo("XtrodesEMG-pc-a", "Signals", "XtrodesEMG-pc-a", "pc-a"),
+        FakeInfo("XtrodesEMG-pc-b", "Signals", "XtrodesEMG-pc-b", "pc-b"),
+    ]
+    rules = {"name": "XtrodesEMG", "type": "Signals", "source_id": "XtrodesEMG"}
+
+    with pytest.raises(ConfigError, match="choose one"):
+        select_stream(streams, rules)
+
+    assert select_stream(streams, {**rules, "hostname": "pc-b"}) is streams[1]
+
+
+def test_worker_exposes_duplicate_choices_and_uses_runtime_selection() -> None:
+    first = FakeInfo("Device-pc-a", "EEG", "source-pc-a", "pc-a")
+    second = FakeInfo("Device-pc-b", "EEG", "source-pc-b", "pc-b")
+
+    class DuplicatePylsl:
+        def resolve_streams(self, wait_time: float) -> list[FakeInfo]:
+            assert wait_time == 1.0
+            return [first, second]
+
+    worker = LSLStreamWorker(
+        StreamConfig(
+            id="eeg",
+            match={"name": "Device", "type": "EEG", "source_id": "source"},
+            channels=(ChannelConfig(index=0),),
+            views=(),
+        ),
+        history_seconds=5.0,
+        inactive_after=2.0,
+        max_points=1000,
+        pylsl_module=DuplicatePylsl(),
+    )
+
+    assert worker._find_stream() is None
+    options = worker.selection_options()
+    assert len(options) == 2
+    pc_b_choice = next(choice_id for choice_id, label in options if "@ pc-b" in label)
+    worker.choose_stream(pc_b_choice)
+
+    assert worker._find_stream() is second
+    assert worker.selection_options() == ()
+
+
 def test_channel_labels_fall_back_when_metadata_is_missing() -> None:
     assert read_channel_labels(InfoWithoutMetadata(), 3) == ["Ch0", "Ch1", "Ch2"]
 
@@ -61,7 +137,7 @@ class FakeStreamInfo(FakeInfo):
 
 class FakeInlet:
     def __init__(self, info: FakeStreamInfo, max_buflen: int) -> None:
-        self.info = info
+        self.stream_info = info
         self.max_buflen = max_buflen
         self.first_chunk = threading.Event()
         self.sent = False
@@ -69,6 +145,10 @@ class FakeInlet:
 
     def open_stream(self, timeout: float) -> None:
         assert timeout == 1.0
+
+    def info(self, timeout: float) -> FakeStreamInfo:
+        assert timeout == 1.0
+        return self.stream_info
 
     def time_correction(self, timeout: float) -> float:
         assert timeout == 0.2
@@ -93,10 +173,13 @@ class FakePylsl:
         self.inlet: FakeInlet | None = None
 
     def resolve_streams(self, wait_time: float) -> list[FakeStreamInfo]:
-        assert wait_time == 0.25
+        assert wait_time == 1.0
         return [self.info]
 
-    def StreamInlet(self, info: FakeStreamInfo, max_buflen: int) -> FakeInlet:
+    def StreamInlet(
+        self, info: FakeStreamInfo, max_buflen: int, recover: bool
+    ) -> FakeInlet:
+        assert recover is False
         self.inlet = FakeInlet(info, max_buflen)
         return self.inlet
 
@@ -167,7 +250,10 @@ class FakeMarkerPylsl(FakePylsl):
         super().__init__()
         self.info = FakeMarkerInfo("Events", "Markers", "source-2")
 
-    def StreamInlet(self, info: FakeMarkerInfo, max_buflen: int) -> FakeMarkerInlet:
+    def StreamInlet(
+        self, info: FakeMarkerInfo, max_buflen: int, recover: bool
+    ) -> FakeMarkerInlet:
+        assert recover is False
         self.inlet = FakeMarkerInlet(info, max_buflen)
         return self.inlet
 
@@ -207,3 +293,125 @@ def test_worker_stores_string_markers_with_corrected_timestamps() -> None:
     ]
     assert snapshot.timestamps.tolist() == [10.5]
     assert snapshot.active is True
+
+
+class LostInlet(FakeInlet):
+    def pull_chunk(self, timeout: float, max_samples: int) -> tuple[list, list]:
+        self.first_chunk.set()
+        raise RuntimeError("Input stream error")
+
+
+class ReconnectingPylsl(FakePylsl):
+    def __init__(self) -> None:
+        super().__init__()
+        self.inlets: list[FakeInlet] = []
+
+    def StreamInlet(
+        self, info: FakeStreamInfo, max_buflen: int, recover: bool
+    ) -> FakeInlet:
+        assert recover is False
+        inlet: FakeInlet
+        if not self.inlets:
+            inlet = LostInlet(info, max_buflen)
+            self.info = FakeStreamInfo("Device replacement", "EEG", "source-2")
+        else:
+            inlet = FakeInlet(info, max_buflen)
+        self.inlets.append(inlet)
+        self.inlet = inlet
+        return inlet
+
+
+def test_worker_rediscovers_after_outlet_transmission_is_lost() -> None:
+    module = ReconnectingPylsl()
+    worker = LSLStreamWorker(
+        StreamConfig(
+            id="eeg",
+            match={"type": "EEG"},
+            channels=(ChannelConfig(index=0),),
+            views=(),
+        ),
+        history_seconds=5.0,
+        inactive_after=3.0,
+        max_points=1000,
+        pylsl_module=module,
+    )
+
+    worker.start()
+    deadline = time.monotonic() + 2.0
+    while (
+        len(module.inlets) < 2 or not module.inlets[-1].first_chunk.is_set()
+    ) and time.monotonic() < deadline:
+        time.sleep(0.005)
+    snapshot = worker.snapshot()
+    worker.stop()
+
+    assert len(module.inlets) >= 2
+    assert module.inlets[0].closed is True
+    assert snapshot.active is True
+
+
+def test_worker_backs_off_same_dead_uid_but_retries_later() -> None:
+    module = FakePylsl()
+    worker = LSLStreamWorker(
+        StreamConfig(
+            id="eeg",
+            match={"type": "EEG"},
+            channels=(ChannelConfig(index=0),),
+            views=(),
+        ),
+        history_seconds=5.0,
+        inactive_after=3.0,
+        max_points=1000,
+        pylsl_module=module,
+    )
+
+    worker._record_failed_stream(module.info)
+    assert worker._find_stream() is None
+
+    uid = next(iter(worker._failed_streams))
+    failures, _ = worker._failed_streams[uid]
+    worker._failed_streams[uid] = (failures, 0.0)
+    assert worker._find_stream() is module.info
+
+
+class CorrectionTimeoutInlet(FakeInlet):
+    def time_correction(self, timeout: float) -> float:
+        assert timeout == 0.2
+        raise RuntimeError("the operation failed due to a timeout")
+
+
+class CorrectionTimeoutPylsl(FakePylsl):
+    def StreamInlet(
+        self, info: FakeStreamInfo, max_buflen: int, recover: bool
+    ) -> CorrectionTimeoutInlet:
+        assert recover is False
+        self.inlet = CorrectionTimeoutInlet(info, max_buflen)
+        return self.inlet
+
+
+def test_time_correction_timeout_does_not_disconnect_a_healthy_stream() -> None:
+    module = CorrectionTimeoutPylsl()
+    worker = LSLStreamWorker(
+        StreamConfig(
+            id="eeg",
+            match={"type": "EEG"},
+            channels=(ChannelConfig(index=0),),
+            views=(),
+        ),
+        history_seconds=5.0,
+        inactive_after=3.0,
+        max_points=1000,
+        pylsl_module=module,
+    )
+
+    worker.start()
+    deadline = time.monotonic() + 1.0
+    while (
+        module.inlet is None or not module.inlet.first_chunk.is_set()
+    ) and time.monotonic() < deadline:
+        time.sleep(0.005)
+    snapshot = worker.snapshot()
+    worker.stop()
+
+    assert snapshot.active is True
+    assert snapshot.timestamps.tolist() == [10.0]

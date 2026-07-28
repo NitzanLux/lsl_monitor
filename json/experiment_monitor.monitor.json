@@ -10,11 +10,10 @@
   },
   "streams": [
     {
-      "id": "XtrodesEMG",
+      "id": "xtrodes_emg",
       "match": {
-        "name": "XtrodesEMG",
-        "type": "Signals",
-        "source_id": "XtrodesEMG"
+        "identity": "XtrodesEMG",
+        "type": "Signals"
       },
       "channels": [
         {
@@ -131,11 +130,10 @@
       ]
     },
     {
-      "id": "XtrodesIMU",
+      "id": "xtrodes_imu",
       "match": {
-        "name": "XtrodesIMU",
-        "type": "Markers",
-        "source_id": "XtrodesIMU"
+        "identity": "XtrodesIMU",
+        "type": "Markers"
       },
       "channels": [
         {
@@ -184,11 +182,10 @@
       ]
     },
     {
-      "id": "MotorControlCursor",
+      "id": "motor_cursor",
       "match": {
-        "name": "MotorControlCursor",
-        "type": "MotorControlCursor",
-        "source_id": "MotorControlCursor"
+        "identity": "MotorControlCursor",
+        "type": "MotorControlCursor"
       },
       "channels": [
         {
@@ -218,6 +215,7 @@
     {
       "id": "stream_1",
       "match": {
+        "identity": "stream_1",
         "type": "Signals"
       },
       "channels": [

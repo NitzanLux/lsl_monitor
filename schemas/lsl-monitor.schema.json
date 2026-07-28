@@ -67,9 +67,15 @@
       "additionalProperties": false,
       "minProperties": 1,
       "properties": {
+        "identity": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Shared identity expected in both the LSL outlet name and source_id."
+        },
         "name": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Exact human-readable name advertised by the LSL outlet; it need not be globally unique."
         },
         "name_regex": {
           "type": "string",
@@ -82,7 +88,13 @@
         },
         "source_id": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Exact stable producer or device identifier advertised by the LSL outlet."
+        },
+        "hostname": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional exact LSL host used to disambiguate otherwise matching outlets."
         }
       }
     },
@@ -268,7 +280,8 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+          "description": "Unique internal dashboard identifier; independent of the LSL outlet identity."
         },
         "match": {
           "$ref": "#/$defs/match"

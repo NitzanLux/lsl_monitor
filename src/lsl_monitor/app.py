@@ -25,6 +25,7 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self.config = config
         self.workers = workers
         self.panels: list[tuple[MonitorPanel, LSLStreamWorker]] = []
+        self._dismissed_choices: dict[str, tuple[str, ...]] = {}
         self.setWindowTitle(config.window.title)
         self.resize(1400, 900)
 
@@ -65,8 +66,10 @@ class MonitorWindow(QtWidgets.QMainWindow):
 
     @QtCore.Slot()
     def refresh(self) -> None:
+        self._request_stream_choices()
         snapshots = {worker.config.id: worker.snapshot() for worker in self.workers}
         for panel, worker in self.panels:
+            panel.set_stream_label(getattr(worker, "display_name", worker.config.id))
             panel.update_snapshot(snapshots[worker.config.id])
         active = sum(snapshot.active for snapshot in snapshots.values())
         total = len(snapshots)
@@ -74,6 +77,33 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self.status.setStyleSheet(
             f"color: {'#4ade80' if active == total else '#f87171'}; font-weight: 600;"
         )
+
+    def _request_stream_choices(self) -> None:
+        """Ask only when discovery finds equally good runtime candidates."""
+
+        for worker in self.workers:
+            options_method = getattr(worker, "selection_options", None)
+            if options_method is None:
+                continue
+            options = options_method()
+            signature = tuple(choice_id for choice_id, _ in options)
+            if len(options) < 2 or self._dismissed_choices.get(worker.config.id) == signature:
+                continue
+            labels = [label for _, label in options]
+            selected, accepted = QtWidgets.QInputDialog.getItem(
+                self,
+                "Choose LSL stream",
+                f"Several outlets match {worker.config.id!r}.\n"
+                "Choose the stream owned by this experiment:",
+                labels,
+                0,
+                False,
+            )
+            if accepted:
+                worker.choose_stream(options[labels.index(selected)][0])
+                self._dismissed_choices.pop(worker.config.id, None)
+            else:
+                self._dismissed_choices[worker.config.id] = signature
 
     def closeEvent(self, event: object) -> None:
         self.timer.stop()

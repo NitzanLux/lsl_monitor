@@ -54,6 +54,125 @@ def automatic_rectangles(count: int, columns: int) -> list[RelativeRect]:
     return rectangles
 
 
+def stretched_rectangles(rectangles: list[RelativeRect]) -> list[RelativeRect]:
+    """Recursively stretch layout groups while preserving their proportions.
+
+    Panels that overlap along an axis belong to the same band on that axis.
+    This exposes nested structures such as columns containing rows containing
+    smaller columns. Each band receives the full cross-axis space of its parent,
+    allowing a partially filled subgroup to consume otherwise blank space.
+    """
+
+    if not rectangles:
+        return []
+
+    result = list(rectangles)
+    # Dragged rectangles include the canvas gutter in their normalized outer
+    # bounds, which can create a tiny apparent overlap between adjacent bands.
+    band_tolerance = 0.01
+
+    def bounds(indices: list[int]) -> RelativeRect:
+        left = min(rectangles[index].x for index in indices)
+        top = min(rectangles[index].y for index in indices)
+        right = max(
+            rectangles[index].x + rectangles[index].width for index in indices
+        )
+        bottom = max(
+            rectangles[index].y + rectangles[index].height for index in indices
+        )
+        return RelativeRect(left, top, right - left, bottom - top)
+
+    def components(indices: list[int], axis: str) -> list[list[int]]:
+        """Return connected components whose source intervals overlap."""
+
+        if axis == "x":
+            interval = lambda index: (
+                rectangles[index].x,
+                rectangles[index].x + rectangles[index].width,
+            )
+        else:
+            interval = lambda index: (
+                rectangles[index].y,
+                rectangles[index].y + rectangles[index].height,
+            )
+        ordered = sorted(indices, key=lambda index: interval(index)[0])
+        groups: list[list[int]] = []
+        group_end = 0.0
+        for index in ordered:
+            start, end = interval(index)
+            if not groups or start >= group_end - band_tolerance:
+                groups.append([index])
+                group_end = end
+            else:
+                groups[-1].append(index)
+                group_end = max(group_end, end)
+        return groups
+
+    def mapped_interval(
+        child: RelativeRect,
+        source: RelativeRect,
+        target: RelativeRect,
+        axis: str,
+    ) -> tuple[float, float]:
+        if axis == "x":
+            source_start, source_size = source.x, max(source.width, 1e-9)
+            child_start, child_size = child.x, child.width
+            target_start, target_size = target.x, target.width
+        else:
+            source_start, source_size = source.y, max(source.height, 1e-9)
+            child_start, child_size = child.y, child.height
+            target_start, target_size = target.y, target.height
+        start = target_start + (child_start - source_start) / source_size * target_size
+        size = child_size / source_size * target_size
+        return start, size
+
+    def fit_group(indices: list[int], target: RelativeRect) -> None:
+        if len(indices) == 1:
+            result[indices[0]] = target
+            return
+
+        source = bounds(indices)
+        x_groups = components(indices, "x")
+        y_groups = components(indices, "y")
+        if len(x_groups) == 1 and len(y_groups) == 1:
+            # Overlapping freeform panels cannot be partitioned further. Apply
+            # one affine stretch to their shared occupied bounds.
+            for index in indices:
+                rectangle = rectangles[index]
+                x, width = mapped_interval(rectangle, source, target, "x")
+                y, height = mapped_interval(rectangle, source, target, "y")
+                result[index] = RelativeRect(x, y, width, height)
+            return
+
+        if len(x_groups) > 1 and (
+            len(y_groups) == 1 or len(x_groups) <= len(y_groups)
+        ):
+            axis, groups = "x", x_groups
+        else:
+            axis, groups = "y", y_groups
+
+        for group in groups:
+            child = bounds(group)
+            start, size = mapped_interval(child, source, target, axis)
+            child_target = (
+                RelativeRect(start, target.y, size, target.height)
+                if axis == "x"
+                else RelativeRect(target.x, start, target.width, size)
+            )
+            fit_group(group, child_target)
+
+    fit_group(list(range(len(rectangles))), RelativeRect(0.0, 0.0, 1.0, 1.0))
+    return [
+        RelativeRect(
+            round(rectangle.x, 12),
+            round(rectangle.y, 12),
+            round(rectangle.width, 12),
+            round(rectangle.height, 12),
+        )
+        for rectangle in result
+    ]
+
+
 class EditablePanelShell(QtWidgets.QWidget):
     """Designer-only wrapper that supports title dragging and corner resizing."""
 

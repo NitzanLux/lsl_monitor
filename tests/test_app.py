@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class MockWorker:
     def __init__(self, config: StreamConfig) -> None:
         self.config = config
+        self.display_name = f"{config.id} outlet @ test-pc"
         self.stopped = False
 
     def snapshot(self):
@@ -33,6 +34,7 @@ def test_monitor_window_uses_responsive_custom_panel_geometry() -> None:
     window.show()
     application.processEvents()
     window.refresh()
+    assert window.panels[0][0].stream_label.text().endswith("@ test-pc")
 
     trace_geometry = window.panels[0][0].geometry()
     plane_geometry = window.panels[1][0].geometry()

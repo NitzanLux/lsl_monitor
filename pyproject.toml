@@ -24,6 +24,7 @@ dev = [
 
 [project.scripts]
 lsl-monitor = "lsl_monitor.cli:main"
+lsl-monitor-demo = "lsl_monitor.demo:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lsl_monitor"]
