@@ -141,13 +141,41 @@ def run(config: MonitorConfig) -> int:
           font-weight: 600;
           padding: 1px 6px;
         }
+        /* In-panel controls: the audio panel and the spectral frequency range. */
+        QComboBox, QDoubleSpinBox, QPushButton {
+          background: #0a131d;
+          border: 1px solid #2b4054;
+          border-radius: 5px;
+          color: #d9e2ec;
+          padding: 3px 6px;
+        }
+        QPushButton:hover { background: #24415a; }
+        QComboBox QAbstractItemView {
+          background: #0a131d;
+          border: 1px solid #2b4054;
+          color: #d9e2ec;
+          selection-background-color: #0e7490;
+        }
+        QSlider::groove:horizontal {
+          background: #16202c;
+          border-radius: 2px;
+          height: 4px;
+        }
+        QSlider::handle:horizontal {
+          background: #67e8f9;
+          border-radius: 6px;
+          margin: -5px 0;
+          width: 12px;
+        }
         QStatusBar { border-top: 1px solid #263445; }
         """
     )
     workers = [
         LSLStreamWorker(
             stream,
-            config.window.history_seconds,
+            # Panels with their own time window decide how much a stream has to
+            # keep, which can be more than the shared trace history.
+            stream.sample_seconds(config.window.history_seconds),
             config.window.inactive_after_seconds,
             config.window.max_points_per_channel,
         )

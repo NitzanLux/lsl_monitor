@@ -142,6 +142,24 @@ def test_audio_and_spectrogram_defaults_are_quiet_and_readable() -> None:
     assert audio.level_seconds == DEFAULT_LEVEL_SECONDS
 
 
+def test_a_stream_keeps_the_longest_sample_history_its_panels_read() -> None:
+    document = _audio_document(
+        [
+            {"type": "traces"},
+            {"type": "spectrogram", "channels": [0], "spectrogram_seconds": 45},
+            {"type": "plane_2d", "channels": [0, 1], "trail_seconds": 20},
+            # Marker events are stored on their own, so a long roll asks for no
+            # extra samples.
+            {"type": "markers", "marker_seconds": 600},
+        ]
+    )
+
+    stream = monitor_config_from_document(document).streams[0]
+
+    assert stream.sample_seconds(10.0) == 45.0
+    assert stream.sample_seconds(90.0) == 90.0, "the trace history is never shortened"
+
+
 def test_schema_rejects_an_unknown_colormap() -> None:
     document = _audio_document([{"type": "spectrogram", "colormap": "rainbow"}])
 

@@ -29,6 +29,9 @@ MOCK_MARKER_TEXTS = (
     "trial/end",
 )
 MOCK_MARKER_PERIOD = 1.3
+#: Samples per channel a preview snapshot draws at most, whatever window it
+#: covers. A long window is thinned to fit rather than cut short.
+MOCK_MAX_POINTS = 20_000
 # How long a mock trigger line holds its code before returning to zero.
 MOCK_MARKER_PULSE = 0.05
 
@@ -197,7 +200,13 @@ def make_mock_snapshot(
     except KeyError as error:
         raise ValueError(f"Unknown mock signal model {model!r}") from error
 
-    point_count = min(5000, max(32, round(history_seconds * nominal_srate)))
+    point_count = max(32, round(history_seconds * nominal_srate))
+    if point_count > MOCK_MAX_POINTS:
+        # Thinning changes the rate the samples really arrive at, and spectral
+        # panels read that rate off the timestamps, so report it as the nominal
+        # one too instead of leaving the two disagreeing.
+        point_count = MOCK_MAX_POINTS
+        nominal_srate = point_count / history_seconds
     timestamps = np.linspace(
         now_lsl_time - history_seconds,
         now_lsl_time,

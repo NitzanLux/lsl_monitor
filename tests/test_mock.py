@@ -4,6 +4,7 @@ import pytest
 from lsl_monitor.config import ChannelConfig, StreamConfig, ViewConfig
 from lsl_monitor.mock import (
     DEFAULT_MOCK_MODEL,
+    MOCK_MAX_POINTS,
     MOCK_MODEL_LABELS,
     MOCK_MODELS,
     make_mock_snapshot,
@@ -32,6 +33,18 @@ def test_every_model_produces_finite_varying_channels() -> None:
         assert np.isfinite(snapshot.samples).all()
         assert snapshot.samples.std(axis=1).min() > 0.0
         assert MOCK_MODEL_LABELS[model].lower() in snapshot.message
+
+
+def test_a_long_window_is_thinned_and_reports_the_rate_it_is_drawn_at() -> None:
+    snapshot = make_mock_snapshot(sample_stream(), 1000.0, 600.0, nominal_srate=500.0)
+
+    assert snapshot.timestamps.size == MOCK_MAX_POINTS, "the window is covered, not cut"
+    assert snapshot.timestamps[0] == pytest.approx(400.0)
+    # Spectral panels read the rate off the timestamps, so the reported nominal
+    # rate has to be the thinned one.
+    measured = 1.0 / float(np.median(np.diff(snapshot.timestamps)))
+    assert snapshot.nominal_srate == pytest.approx(MOCK_MAX_POINTS / 600.0)
+    assert measured == pytest.approx(snapshot.nominal_srate, rel=1e-3)
 
 
 def test_models_are_deterministic() -> None:

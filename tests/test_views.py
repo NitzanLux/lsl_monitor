@@ -154,6 +154,13 @@ def test_spectrogram_columns_find_a_tone_and_end_at_the_newest_sample() -> None:
     assert decibels.shape == (times.size, frequencies.size)
     assert times.size > 1 and np.all(np.diff(times) > 0)
     assert times[-1] < 0.0, "columns are aged relative to the newest sample"
+    # The columns cover the block end to end: the first is centered half a
+    # window after its oldest sample and the last half a window before the
+    # newest one, so nothing is left over against either edge of a plot.
+    half_window = 128.0 / rate
+    span = (tone.size - 1) / rate
+    assert times[0] == pytest.approx(half_window - span, abs=2.0 / rate)
+    assert times[-1] == pytest.approx(-half_window, abs=2.0 / rate)
     loudest = frequencies[np.argmax(decibels, axis=1)]
     assert loudest == pytest.approx(60.0, abs=rate / 256)
     assert frequencies[-1] == pytest.approx(rate / 2.0)
@@ -170,9 +177,100 @@ def test_spectrogram_bounds_its_transform_count_and_needs_a_full_window() -> Non
     assert spectrogram_decibels(np.zeros(500), 0.0, 256)[0].size == 0
 
 
+def test_spectrogram_image_fills_the_time_window_it_is_configured_with() -> None:
+    application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    view = ViewConfig(type="spectrogram", fft_size=256, spectrogram_seconds=8.0)
+    panel = SpectrogramPanel("spectrogram", view, [0], 10.0)
+
+    panel.update_snapshot(make_snapshot())
+    application.processEvents()
+
+    drawn = panel.image.mapRectToView(panel.image.boundingRect())
+    assert panel.plot.viewRange()[0] == pytest.approx([-8.0, 0.0], abs=0.01)
+    assert drawn.left() == pytest.approx(-8.0, abs=0.02)
+    assert drawn.right() == pytest.approx(0.0, abs=0.02)
+    panel.close()
+
+
+def test_spectrogram_draws_only_the_history_it_has_while_a_window_fills_up() -> None:
+    application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    # The snapshot carries 10 seconds, a third of the configured window.
+    view = ViewConfig(type="spectrogram", fft_size=256, spectrogram_seconds=30.0)
+    panel = SpectrogramPanel("spectrogram", view, [0], 10.0)
+
+    panel.update_snapshot(make_snapshot())
+    application.processEvents()
+
+    drawn = panel.image.mapRectToView(panel.image.boundingRect())
+    assert panel.plot.viewRange()[0] == pytest.approx([-30.0, 0.0], abs=0.01)
+    assert drawn.left() == pytest.approx(-10.0, abs=0.02)
+    assert drawn.right() == pytest.approx(0.0, abs=0.02)
+    panel.close()
+
+
 def test_spectrogram_colormap_falls_back_to_the_default_on_an_unknown_name() -> None:
     assert spectrogram_colormap("magma") is not None
     assert spectrogram_colormap("not-a-colormap") is not None
+
+
+def test_frequency_range_narrows_a_live_panel_and_is_given_back_to_the_stream() -> None:
+    application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    psd = PsdPanel("psd", ViewConfig(type="psd", fft_size=256), [0, 1])
+    spectrogram = SpectrogramPanel(
+        "spectrogram", ViewConfig(type="spectrogram", fft_size=256), [0], 10.0
+    )
+    for panel in (psd, spectrogram):
+        panel.update_snapshot(make_snapshot())
+    application.processEvents()
+
+    # The 100 Hz test stream reaches 50 Hz, which both panels start out showing.
+    assert psd.frequency_control.limits is None
+    assert psd.frequency_control.high.value() == pytest.approx(50.0, abs=0.1)
+    assert psd.plot.viewRange()[0][1] == pytest.approx(50.0, abs=0.1)
+    assert spectrogram.plot.viewRange()[1][1] == pytest.approx(50.0, abs=0.1)
+
+    for panel in (psd, spectrogram):
+        panel.frequency_control.high.setValue(12.0)
+        panel.update_snapshot(make_snapshot())
+    application.processEvents()
+
+    assert psd.frequency_control.limits == (0.0, 12.0)
+    assert psd.plot.viewRange()[0] == pytest.approx([0.0, 12.0], abs=0.01)
+    assert spectrogram.plot.viewRange()[1] == pytest.approx([0.0, 12.0], abs=0.01)
+
+    for panel in (psd, spectrogram):
+        panel.frequency_control.full_button.click()
+        panel.update_snapshot(make_snapshot())
+    application.processEvents()
+
+    assert psd.frequency_control.limits is None
+    assert psd.plot.viewRange()[0][1] == pytest.approx(50.0, abs=0.1)
+    assert spectrogram.plot.viewRange()[1][1] == pytest.approx(50.0, abs=0.1)
+    for panel in (psd, spectrogram):
+        panel.close()
+
+
+def test_configured_frequency_range_is_the_starting_point_of_the_control() -> None:
+    QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    view = ViewConfig(type="psd", fft_size=256, frequency_range=(8.0, 30.0))
+
+    panel = PsdPanel("psd", view, [0])
+    panel.update_snapshot(make_snapshot())
+
+    assert panel.frequency_control.limits == (8.0, 30.0)
+    assert panel.plot.viewRange()[0] == pytest.approx([8.0, 30.0], abs=0.01)
+    panel.close()
+
+
+def test_the_designer_preview_leaves_frequency_bounds_to_its_own_form() -> None:
+    QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    panel = create_panel(
+        "psd", ViewConfig(type="psd"), [0, 1], 10.0, editable=True, stream_id="emg"
+    )
+
+    assert not panel.frequency_control.isVisibleTo(panel)
+    panel.close()
 
 
 def test_audio_panel_meters_every_channel_and_plays_one_of_them() -> None:

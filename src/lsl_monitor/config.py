@@ -109,6 +109,22 @@ class StreamConfig:
     channels: tuple[ChannelConfig, ...]
     views: tuple[ViewConfig, ...]
 
+    def sample_seconds(self, history_seconds: float) -> float:
+        """Return the longest sample history any of this stream's panels reads.
+
+        A spectrogram or a 2D trail can be configured to reach further back than
+        the trace history, and those samples have to be kept for them: a panel
+        given less than it asks for draws over part of its own time axis.
+        """
+
+        windows = [history_seconds]
+        for view in self.views:
+            if view.type == "spectrogram":
+                windows.append(view.spectrogram_window(history_seconds))
+            elif view.type == "plane_2d":
+                windows.append(view.trail_window(history_seconds))
+        return max(windows)
+
 
 @dataclass(frozen=True)
 class WindowConfig:

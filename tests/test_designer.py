@@ -4,6 +4,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from lsl_monitor.config import monitor_config_from_document
@@ -33,6 +34,31 @@ def test_starter_document_is_valid_and_mockable() -> None:
     assert snapshot.samples.shape[0] == 2
     assert snapshot.samples.shape[1] == snapshot.timestamps.size
     assert snapshot.channel_labels == ("Channel 1", "Channel 2")
+
+
+def test_preview_signal_covers_the_window_a_spectrogram_scrolls_through() -> None:
+    application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    document = new_document()
+    # Four times the trace history: the preview has to mock that much signal.
+    document["streams"][0]["views"] = [
+        {
+            "type": "spectrogram",
+            "channels": [0],
+            "fft_size": 256,
+            "spectrogram_seconds": 40,
+        }
+    ]
+    preview = DashboardPreview()
+
+    assert preview.set_document(document) is None
+    application.processEvents()
+
+    panel, _ = preview.panels[0]
+    drawn = panel.image.mapRectToView(panel.image.boundingRect())
+    assert isinstance(panel, SpectrogramPanel)
+    assert drawn.left() == pytest.approx(-40.0, abs=0.5)
+    assert drawn.right() == pytest.approx(0.0, abs=0.5)
+    preview.close()
 
 
 def test_saved_document_has_relative_schema_reference(tmp_path: Path) -> None:

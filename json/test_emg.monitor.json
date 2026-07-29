@@ -1,0 +1,43 @@
+{
+  "$schema": "../schemas/lsl-monitor.schema.json",
+  "window": {
+    "title": "My LSL monitor",
+    "history_seconds": 10,
+    "refresh_hz": 20,
+    "columns": 2,
+    "inactive_after_seconds": 2,
+    "max_points_per_channel": 100000
+  },
+  "streams": [
+    {
+      "id": "XtrodesEMG",
+      "match": {
+        "identity": "XtrodesEMG",
+        "type": "Signals"
+      },
+      "channels": [
+        {
+          "index": 0,
+          "label": "Channel 1",
+          "color": "#5eead4"
+        },
+        {
+          "index": 1,
+          "label": "Channel 2",
+          "color": "#60a5fa"
+        }
+      ],
+      "views": [
+        {
+          "type": "psd",
+          "title": "Power spectrum",
+          "channels": [
+            0,
+            1
+          ],
+          "fft_size": 1024
+        }
+      ]
+    }
+  ]
+}

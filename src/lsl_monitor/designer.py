@@ -459,10 +459,13 @@ class DashboardPreview(QtWidgets.QFrame):
         if 0 <= index < len(self.panel_paths):
             self.panel_geometry_changed.emit(self.panel_paths[index], rectangle)
 
+    def _history_seconds(self) -> float:
+        return self.config.window.history_seconds if self.config else 10.0
+
     def _marker_seconds(self, stream: StreamConfig) -> float:
         """Return the longest marker roll requested by a stream's panels."""
 
-        history = self.config.window.history_seconds if self.config else 10.0
+        history = self._history_seconds()
         return max(
             (
                 view.marker_window(history)
@@ -481,7 +484,10 @@ class DashboardPreview(QtWidgets.QFrame):
             stream.id: make_mock_snapshot(
                 stream,
                 now,
-                self.config.window.history_seconds,
+                # A panel with its own time window, such as a spectrogram set to
+                # scroll through more than the trace history, needs the preview
+                # to hand it that much signal.
+                stream.sample_seconds(self._history_seconds()),
                 model=self.model_for_stream(index),
                 marker_seconds=self._marker_seconds(stream),
             )
