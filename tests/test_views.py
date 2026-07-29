@@ -4,29 +4,32 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
-from PySide6 import QtWidgets
+from PySide6 import QtMultimedia, QtWidgets
 
+from lsl_monitor.audio import AudioOutput
 from lsl_monitor.config import ViewConfig
 from lsl_monitor.model import MarkerEvent, StreamSnapshot
 from lsl_monitor.views import (
     AlivePanel,
+    AudioPanel,
     MarkerPanel,
     PlanePanel,
     PsdPanel,
+    SpectrogramPanel,
     TracePanel,
     create_panel,
     marker_entries,
+    spectrogram_colormap,
+    spectrogram_decibels,
 )
 
 
-def make_snapshot(markers: tuple[MarkerEvent, ...] = ()) -> StreamSnapshot:
-    timestamps = np.linspace(90.0, 100.0, 1001)
-    samples = np.vstack(
-        (
-            np.sin(2 * np.pi * 5 * (timestamps - 90.0)),
-            np.cos(2 * np.pi * 5 * (timestamps - 90.0)),
-        )
-    )
+def make_snapshot(
+    markers: tuple[MarkerEvent, ...] = (), now: float = 100.0
+) -> StreamSnapshot:
+    timestamps = np.linspace(now - 10.0, now, 1001)
+    phase = timestamps - (now - 10.0)
+    samples = np.vstack((np.sin(2 * np.pi * 5 * phase), np.cos(2 * np.pi * 5 * phase)))
     return StreamSnapshot(
         stream_id="emg",
         connected=True,
@@ -37,8 +40,8 @@ def make_snapshot(markers: tuple[MarkerEvent, ...] = ()) -> StreamSnapshot:
         channel_labels=("Left", "Right"),
         channel_colors=("#5eead4", "#60a5fa"),
         nominal_srate=100.0,
-        last_sample_lsl_time=100.0,
-        now_lsl_time=100.0,
+        last_sample_lsl_time=now,
+        now_lsl_time=now,
         markers=markers,
     )
 
@@ -60,6 +63,15 @@ def test_all_panel_types_render_a_snapshot() -> None:
         PsdPanel("psd", ViewConfig(type="psd", fft_size=256), [0, 1]),
         AlivePanel("alive", ViewConfig(type="alive")),
         MarkerPanel("markers", ViewConfig(type="markers"), [0, 1], 10.0),
+        SpectrogramPanel(
+            "spectrogram", ViewConfig(type="spectrogram", fft_size=256), [0], 10.0
+        ),
+        AudioPanel(
+            "audio",
+            ViewConfig(type="audio"),
+            [0, 1],
+            output=AudioOutput(device=QtMultimedia.QAudioDevice()),
+        ),
     ]
 
     for panel in panels:
@@ -77,6 +89,8 @@ def test_all_panel_types_render_a_snapshot() -> None:
     )
     assert len(panels[2].curves[0].xData) > 0
     assert panels[3].indicator.text() == "ACTIVE"
+    assert panels[5].image.image is not None
+    assert len(panels[6].meters) == 2
     for panel in panels:
         panel.close()
 
@@ -84,7 +98,15 @@ def test_all_panel_types_render_a_snapshot() -> None:
 def test_every_panel_names_its_stream_beside_the_title() -> None:
     QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
-    for view_type in ("traces", "plane_2d", "psd", "markers", "alive"):
+    for view_type in (
+        "traces",
+        "plane_2d",
+        "psd",
+        "spectrogram",
+        "audio",
+        "markers",
+        "alive",
+    ):
         panel = create_panel(
             "Custom title",
             ViewConfig(type=view_type),
@@ -119,6 +141,70 @@ def test_alive_panel_reports_the_measured_transmission_rate() -> None:
     assert "100 Hz nominal" in panel.rate.text()
     assert "2 ch" in panel.rate.text()
     assert float(panel.rate.text().split(" samples/s")[0]) == pytest.approx(100.5, abs=1.0)
+    panel.close()
+
+
+def test_spectrogram_columns_find_a_tone_and_end_at_the_newest_sample() -> None:
+    rate = 500.0
+    seconds = np.arange(0.0, 4.0, 1.0 / rate)
+    tone = np.sin(2.0 * np.pi * 60.0 * seconds)
+
+    decibels, frequencies, times = spectrogram_decibels(tone, rate, fft_size=256)
+
+    assert decibels.shape == (times.size, frequencies.size)
+    assert times.size > 1 and np.all(np.diff(times) > 0)
+    assert times[-1] < 0.0, "columns are aged relative to the newest sample"
+    loudest = frequencies[np.argmax(decibels, axis=1)]
+    assert loudest == pytest.approx(60.0, abs=rate / 256)
+    assert frequencies[-1] == pytest.approx(rate / 2.0)
+
+
+def test_spectrogram_bounds_its_transform_count_and_needs_a_full_window() -> None:
+    values = np.random.default_rng(7).standard_normal(200_000)
+
+    decibels, _, times = spectrogram_decibels(values, 44100.0, fft_size=1024)
+
+    assert times.size <= 400, "a fast stream must not pay one transform per sample"
+    assert decibels.shape[0] == times.size
+    assert spectrogram_decibels(np.zeros(8), 500.0, 256)[0].size == 0
+    assert spectrogram_decibels(np.zeros(500), 0.0, 256)[0].size == 0
+
+
+def test_spectrogram_colormap_falls_back_to_the_default_on_an_unknown_name() -> None:
+    assert spectrogram_colormap("magma") is not None
+    assert spectrogram_colormap("not-a-colormap") is not None
+
+
+def test_audio_panel_meters_every_channel_and_plays_one_of_them() -> None:
+    application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    panel = AudioPanel(
+        "audio",
+        ViewConfig(type="audio", audio_gain=2.0, level_seconds=1.0),
+        [0, 1],
+        output=AudioOutput(device=QtMultimedia.QAudioDevice()),
+    )
+
+    panel.update_snapshot(make_snapshot())
+    panel.resize(400, 200)
+    panel.show()
+    application.processEvents()
+
+    assert [name.text() for name in panel.channel_names] == ["Left", "Right"]
+    assert panel.channel_combo.count() == 2
+    assert panel.muted is True, "a panel must not make a sound before it is asked to"
+    assert panel.played_until == 100.0, "playback starts at the live edge"
+    assert panel.gain_label.text() == "+6 dB"
+    # A full-scale sine at twice the gain reads as +3 dB RMS and +6 dB peak.
+    assert panel.meters[0].level_db == pytest.approx(3.0, abs=0.1)
+    assert panel.meters[0].peak_db == pytest.approx(6.0, abs=0.1)
+    assert "metering only" in panel.status.text()
+
+    panel.listen_check.setChecked(True)
+    panel.update_snapshot(make_snapshot(now=100.5))
+    application.processEvents()
+
+    assert panel.played_until == 100.5
+    assert panel.output.dropped_samples > 0, "no device means the samples go nowhere"
     panel.close()
 
 

@@ -17,7 +17,7 @@ from lsl_monitor.designer import (
     save_document,
 )
 from lsl_monitor.mock import DEFAULT_MOCK_MODEL, make_mock_snapshot
-from lsl_monitor.views import TracePanel
+from lsl_monitor.views import AudioPanel, SpectrogramPanel, TracePanel
 
 
 def test_starter_document_is_valid_and_mockable() -> None:
@@ -162,6 +162,80 @@ def test_designer_adds_a_marker_roll_panel_with_its_own_window() -> None:
     roll = window.preview.panels[-1][0]
     assert roll.marker_seconds == 45.0
     assert roll.entries, "the mock preview should roll marker events"
+    window.close()
+
+
+def test_designer_adds_a_spectrogram_panel_for_one_channel() -> None:
+    application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = DesignerWindow(new_document())
+    window.show()
+
+    window.new_view_type.setCurrentText("spectrogram")
+    window._add_view()
+    window.colormap_combo.setCurrentText("magma")
+    window.dynamic_range_spin.setValue(42.0)
+    window._refresh_preview()
+    application.processEvents()
+
+    view = window.document["streams"][0]["views"][-1]
+    assert view["type"] == "spectrogram"
+    assert view["channels"] == [0], "a heat map starts on the first channel"
+    assert view["colormap"] == "magma"
+    assert view["dynamic_range_db"] == 42.0
+    assert window.colormap_combo.isEnabled()
+    panel = window.preview.panels[-1][0]
+    assert isinstance(panel, SpectrogramPanel)
+    assert panel.image.image is not None, "the mock preview should fill the heat map"
+    window.close()
+
+
+def test_designer_adds_a_muted_audio_panel() -> None:
+    application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = DesignerWindow(new_document())
+    window.show()
+
+    window.new_view_type.setCurrentText("audio")
+    window._add_view()
+    window.audio_gain_spin.setValue(2.5)
+    window._refresh_preview()
+    application.processEvents()
+
+    view = window.document["streams"][0]["views"][-1]
+    assert view["type"] == "audio"
+    assert view["audio_gain"] == 2.5
+    assert "audio_muted" not in view, "muted is the default, so it is not written"
+    panel = window.preview.panels[-1][0]
+    assert isinstance(panel, AudioPanel)
+    assert panel.muted is True, "a preview must not play until it is asked to"
+    assert len(panel.meters) == 2
+
+    window.audio_muted_check.setChecked(False)
+    application.processEvents()
+    assert window.document["streams"][0]["views"][-1]["audio_muted"] is False
+    window.close()
+
+
+def test_view_arguments_are_shown_only_for_the_panel_type_that_uses_them() -> None:
+    application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = DesignerWindow(new_document())
+    window.show()
+    application.processEvents()
+
+    window.view_type_combo.setCurrentText("spectrogram")
+    application.processEvents()
+    form = window.view_arguments_form
+
+    assert form.isRowVisible(window.colormap_combo)
+    assert form.isRowVisible(window.fft_spin)
+    assert not form.isRowVisible(window.audio_gain_spin)
+
+    window.view_type_combo.setCurrentText("audio")
+    application.processEvents()
+
+    assert form.isRowVisible(window.audio_gain_spin)
+    assert form.isRowVisible(window.level_seconds_spin)
+    assert not form.isRowVisible(window.colormap_combo)
+    assert form.isRowVisible(window.status_dot_check), "every panel keeps its dot"
     window.close()
 
 

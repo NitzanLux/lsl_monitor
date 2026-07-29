@@ -4,10 +4,14 @@ from pathlib import Path
 import pytest
 
 from lsl_monitor.config import (
+    DEFAULT_COLORMAP,
+    DEFAULT_DYNAMIC_RANGE_DB,
+    DEFAULT_LEVEL_SECONDS,
     ChannelConfig,
     ConfigError,
     configured_view_positions,
     load_config,
+    monitor_config_from_document,
     resolve_channel_indices,
 )
 
@@ -82,6 +86,67 @@ def test_configured_view_references_accept_label_name_and_index() -> None:
     assert configured_view_positions((3,), channels) == [0]
     with pytest.raises(ConfigError, match="unselected"):
         configured_view_positions((2,), channels)
+
+
+def _audio_document(views: list[dict]) -> dict:
+    return {
+        "streams": [
+            {
+                "id": "microphone",
+                "match": {"identity": "Mic", "type": "Audio"},
+                "channels": [{"index": 0, "label": "Left"}, {"index": 1}],
+                "views": views,
+            }
+        ]
+    }
+
+
+def test_spectrogram_and_audio_arguments_are_loaded() -> None:
+    document = _audio_document(
+        [
+            {
+                "type": "spectrogram",
+                "channels": [0],
+                "fft_size": 512,
+                "frequency_range": [20, 8000],
+                "spectrogram_seconds": 6,
+                "dynamic_range_db": 48,
+                "colormap": "magma",
+            },
+            {"type": "audio", "audio_gain": 4, "audio_muted": False, "level_seconds": 0.1},
+        ]
+    )
+
+    spectrogram, audio = monitor_config_from_document(document).streams[0].views
+
+    assert spectrogram.fft_size == 512
+    assert spectrogram.frequency_range == (20.0, 8000.0)
+    assert spectrogram.spectrogram_window(10.0) == 6.0
+    assert spectrogram.dynamic_range_db == 48.0
+    assert spectrogram.colormap == "magma"
+    assert audio.audio_gain == 4.0
+    assert audio.audio_muted is False
+    assert audio.level_seconds == 0.1
+
+
+def test_audio_and_spectrogram_defaults_are_quiet_and_readable() -> None:
+    document = _audio_document([{"type": "spectrogram"}, {"type": "audio"}])
+
+    spectrogram, audio = monitor_config_from_document(document).streams[0].views
+
+    assert spectrogram.spectrogram_window(10.0) == 10.0, "defaults to the trace history"
+    assert spectrogram.dynamic_range_db == DEFAULT_DYNAMIC_RANGE_DB
+    assert spectrogram.colormap == DEFAULT_COLORMAP
+    assert audio.audio_muted is True, "a dashboard opens silent"
+    assert audio.audio_gain == 1.0
+    assert audio.level_seconds == DEFAULT_LEVEL_SECONDS
+
+
+def test_schema_rejects_an_unknown_colormap() -> None:
+    document = _audio_document([{"type": "spectrogram", "colormap": "rainbow"}])
+
+    with pytest.raises(ConfigError, match="colormap"):
+        monitor_config_from_document(document)
 
 
 def test_responsive_panel_layout_must_stay_inside_window(tmp_path: Path) -> None:
