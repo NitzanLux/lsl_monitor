@@ -44,6 +44,18 @@ class PanelLayoutConfig:
 #: Rows the markers panel shows before older events are only counted.
 DEFAULT_MARKER_LIMIT = 48
 
+#: Decibels below the loudest bin that the spectrogram still colors.
+DEFAULT_DYNAMIC_RANGE_DB = 60.0
+
+#: Color map used by a spectrogram that does not name one.
+DEFAULT_COLORMAP = "viridis"
+
+#: Color maps a spectrogram can be drawn with.
+COLORMAPS = ("viridis", "magma", "inferno", "plasma", "cividis", "turbo")
+
+#: Seconds of history each audio level meter integrates over.
+DEFAULT_LEVEL_SECONDS = 0.4
+
 
 @dataclass(frozen=True)
 class ViewConfig:
@@ -64,6 +76,12 @@ class ViewConfig:
     marker_seconds: float | None = None
     marker_limit: int = DEFAULT_MARKER_LIMIT
     trail_seconds: float | None = None
+    spectrogram_seconds: float | None = None
+    dynamic_range_db: float = DEFAULT_DYNAMIC_RANGE_DB
+    colormap: str = DEFAULT_COLORMAP
+    audio_gain: float = 1.0
+    audio_muted: bool = True
+    level_seconds: float = DEFAULT_LEVEL_SECONDS
     layout: PanelLayoutConfig | None = None
 
     def marker_window(self, history_seconds: float) -> float:
@@ -75,6 +93,11 @@ class ViewConfig:
         """Return the 2D trajectory length, falling back to the trace history."""
 
         return self.trail_seconds or history_seconds
+
+    def spectrogram_window(self, history_seconds: float) -> float:
+        """Return the spectrogram length, falling back to the trace history."""
+
+        return self.spectrogram_seconds or history_seconds
 
 
 @dataclass(frozen=True)
@@ -179,6 +202,7 @@ def monitor_config_from_document(
             frequency_range = item.get("frequency_range")
             marker_seconds = item.get("marker_seconds")
             trail_seconds = item.get("trail_seconds")
+            spectrogram_seconds = item.get("spectrogram_seconds")
             layout = item.get("layout")
             views.append(
                 ViewConfig(
