@@ -5,23 +5,249 @@ during a Lab Streaming Layer recording. It discovers every configured stream,
 reconnects when an outlet disappears, and uses corrected LSL timestamps for the
 display timeline and active/inactive decisions.
 
-The initial views are:
+The process is a **read-only LSL consumer**. It never creates an outlet and never
+writes a recording, so it is safe to start and stop at any point during an
+experiment.
 
-- `traces`: selected channels as vertically normalized, stacked lanes or raw
-  overlays.
-- `plane_2d`: one selected channel against another as a fading trajectory;
-  opacity increases toward the latest sample.
-- `psd`: a live windowed power spectral density.
-- `alive`: a large green/red indicator with the age of the latest sample in LSL
-  time.
+- [Install](#install)
+- [Quick start (no hardware)](#quick-start-no-hardware)
+- [Monitor your own streams](#monitor-your-own-streams)
+- [Panel types](#panel-types)
+- [Configuration reference](#configuration-reference)
+- [Visual layout designer](#visual-layout-designer)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
 
-Every panel header carries the stream's activity dot, its title (the view type
-unless `title` overrides it), and the configured stream `id`, so each plot names
-the stream it belongs to even when several streams are monitored side by side.
+## Install
 
-Panels share the available window on a responsive freeform canvas. Trace lanes
-are individually normalized in `stacked` mode, which keeps all selected signals
-visible even when their amplitudes differ.
+Python 3.10 or newer is required. From the repository root:
+
+```powershell
+uv sync --all-groups
+```
+
+This creates `.venv`, installs the application and development tools, and uses
+the committed `uv.lock` for reproducible versions. Activating the environment is
+optional because every command below runs through `uv`.
+
+## Quick start (no hardware)
+
+Two ways to see the dashboard without any real device.
+
+**1. Live mock experiment.** The repository ships a mock producer for
+[json/experiment_monitor_full.json](json/experiment_monitor_full.json), which
+publishes all eight outlets that configuration expects: EMG, IMU, cursor
+position, three camera-health signals, and two marker streams.
+
+In one terminal:
+
+```powershell
+uv run lsl-monitor-demo
+```
+
+In a second terminal:
+
+```powershell
+uv run lsl-monitor json/experiment_monitor_full.json
+```
+
+The traces and 2D cursor animate continuously, and both marker panels receive
+named events. By default camera 2 pauses for four seconds during every
+16-second cycle: because the monitor marks a stream inactive after two seconds,
+that health panel turns red and then returns to green when samples resume — a
+live demonstration of the dropout feedback.
+
+| Demo option | Effect |
+| --- | --- |
+| `--fault-cycle-seconds 0` | Publish continuously, no simulated dropouts |
+| `--fault-cycle-seconds 30` | Change the dropout period (default `16`) |
+| `--duration 10` | Stop after 10 seconds, for a timed smoke test |
+
+Run both commands from the repository root, and see
+[Troubleshooting](#troubleshooting) if the panels stay red. The
+equivalent checkout-local launcher is
+`uv run python scripts/run_mock_experiment.py`.
+
+**2. Layout designer.** Build and preview a layout against generated mock
+signals, with no LSL traffic at all:
+
+```powershell
+uv run lsl-monitor --designer
+```
+
+See [Visual layout designer](#visual-layout-designer).
+
+## Monitor your own streams
+
+1. Copy [json/example.monitor.json](json/example.monitor.json) to your own
+   `*.monitor.json` file.
+2. Edit its `streams` so each entry matches one of your LSL outlets — see the
+   [configuration reference](#configuration-reference), or build the file
+   visually in the [designer](#visual-layout-designer).
+3. Check the file before going near the hardware:
+
+   ```powershell
+   uv run lsl-monitor my_experiment.monitor.json --validate
+   ```
+
+   This validates against the schema and prints the stream count without
+   starting the GUI or touching LSL.
+4. Run it:
+
+   ```powershell
+   uv run lsl-monitor my_experiment.monitor.json
+   ```
+
+Order does not matter: start the outlets before or after the dashboard, which
+keeps searching and connects when they appear. A stream turns green only after
+samples arrive within `inactive_after_seconds` — merely discovering an outlet is
+not enough.
+
+### Command reference
+
+```text
+lsl-monitor [config] [--validate] [--designer]
+```
+
+| Argument | Meaning |
+| --- | --- |
+| `config` | Path to a monitor JSON file. Defaults to `json/example.monitor.json` |
+| `--validate` | Validate and report, then exit without starting the GUI |
+| `--designer` | Open the visual designer instead of monitoring; `config` preloads a file to edit |
+
+Exit code `2` means the configuration failed to load or validate; the reason is
+printed to stderr.
+
+## Panel types
+
+Set the panel kind with a view's `type`.
+
+| `type` | Shows |
+| --- | --- |
+| `traces` | Selected channels over time, as vertically normalized stacked lanes or raw overlays |
+| `plane_2d` | One channel against another as a fading trajectory; opacity increases toward the latest sample |
+| `psd` | A live windowed power spectral density |
+| `alive` | A large green/red indicator with the age of the latest sample in LSL time |
+| `markers` | A rolling list of named events, newest first |
+
+Trace lanes are individually normalized in `stacked` alignment, which keeps every
+selected signal visible even when their amplitudes differ. `overlay` draws them
+together in raw units.
+
+`markers` panels prefer real marker samples (string-format outlets); for a
+numeric stream they fall back to reading steps to a non-zero value on the
+selected trigger channel, so a hardware trigger line can be read as events.
+
+Every panel header carries the stream's activity dot, the panel title (the view
+type unless `title` overrides it), and the configured stream `id`, so each plot
+names the stream it belongs to even when several streams are monitored side by
+side. Panels share the available window on a responsive freeform canvas.
+
+## Configuration reference
+
+The contract is [schemas/lsl-monitor.schema.json](schemas/lsl-monitor.schema.json),
+a JSON Schema Draft 2020-12 document. Keep the `$schema` entry at the top of your
+file and editors such as VS Code will offer completion and inline validation.
+
+A minimal configuration:
+
+```json
+{
+  "$schema": "./schemas/lsl-monitor.schema.json",
+  "window": { "title": "My monitor", "history_seconds": 10 },
+  "streams": [
+    {
+      "id": "emg",
+      "match": { "identity": "EMG", "type": "EMG" },
+      "channels": [
+        { "index": 0, "label": "Left", "color": "#5eead4" },
+        { "index": 1, "label": "Right", "color": "#60a5fa" }
+      ],
+      "views": [
+        { "type": "traces", "alignment": "stacked" },
+        { "type": "alive" }
+      ]
+    }
+  ]
+}
+```
+
+### `window`
+
+All fields are optional.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `title` | `"LSL Monitor"` | Window caption |
+| `history_seconds` | `10` | Length of the visible time axis (max `3600`) |
+| `refresh_hz` | `20` | Redraw rate, `1`–`120` |
+| `columns` | `2` | Grid columns used for panels that have no explicit `layout`, `1`–`8` |
+| `inactive_after_seconds` | `2` | Age at which a stream turns red, `0`–`60` |
+| `max_points_per_channel` | `100000` | Per-channel ring-buffer capacity |
+
+`inactive_after_seconds` is evaluated against `pylsl.local_clock` and the inlet's
+time-corrected sample timestamp, not wall-clock arrival time.
+
+### `streams[]`
+
+Each stream requires `id`, `match`, `channels`, and `views`.
+
+- **`id`** — an internal dashboard identifier shown in every panel header. It
+  must be unique within the file and must start with a letter, but it does not
+  need to equal any LSL field.
+- **`match`** — one or more LSL outlet fields; at least one is required.
+  - `identity`: the shared value expected in **both** the outlet's
+    human-readable `name` and its stable producer `source_id`. This is the
+    recommended rule and is independent of the dashboard `id`.
+  - `type`: the advertised content type, e.g. `EEG`, `Signals`, `Markers`.
+  - `hostname`: optional exact LSL host, to disambiguate identical outlets on
+    different computers.
+  - Legacy rules `name`, `source_id`, and `name_regex` remain supported.
+
+  If an outlet appends its computer name to its identity, the monitor selects the
+  closest suffix match automatically. When equally close outlets exist on
+  multiple computers, the running monitor asks which full outlet belongs to this
+  experiment, so the JSON stays portable between machines.
+- **`channels`** — the channels to select, each by *either* zero-based `index`
+  *or* exact LSL metadata `name` (not both). Optional `label` overrides the
+  displayed name, and `color` is a `#rrggbb` hex string. This array's order is
+  the default draw order for every panel of the stream.
+- **`views`** — the panels for this stream, at least one.
+
+### `views[]`
+
+`type` is required; everything else is optional. Each option below applies to one
+panel type only, except `title`, `channels`, `layout`, and `status_dot`, which
+apply everywhere.
+
+| Field | Applies to | Default | Meaning |
+| --- | --- | --- | --- |
+| `title` | all | the `type` | Panel heading |
+| `channels` | all | every selected channel | Subset to draw, by raw index, metadata name, or display label. Also sets this panel's draw order |
+| `status_dot` | all | `true` | Show the green/red activity dot in the title row |
+| `layout` | all | auto grid | Responsive rectangle, see below |
+| `alignment` | `traces` | `"stacked"` | `stacked` (per-lane normalized) or `overlay` (raw units) |
+| `fft_size` | `psd` | `1024` | FFT window length, `16`–`1048576` |
+| `frequency_range` | `psd` | full band | `[low, high]` in Hz; `high` must exceed `low` |
+| `trail_seconds` | `plane_2d` | `history_seconds` | Trajectory length |
+| `marker_seconds` | `markers` | `history_seconds` | Rolling window length |
+| `marker_limit` | `markers` | `48` | Rows drawn; older events are counted only, `1`–`500` |
+
+`plane_2d` requires exactly two channels, either selected explicitly or by the
+stream having exactly two.
+
+### `layout`
+
+`layout` places a panel on a freeform canvas using fractions of the window, so
+the composition scales with any monitor size:
+
+```json
+{ "x": 0, "y": 0, "width": 0.7, "height": 1 }
+```
+
+That gives a panel the left 70% of the window. `x + width` and `y + height` must
+not exceed `1`. Views without `layout` are arranged automatically using
+`window.columns`.
 
 ## Visual layout designer
 
@@ -31,17 +257,25 @@ Open the designer without connecting any LSL hardware:
 uv run lsl-monitor --designer
 ```
 
+To edit an existing configuration:
+
+```powershell
+uv run lsl-monitor json/example.monitor.json --designer
+```
+
 The left side creates mock streams, channel labels and colors, and view panels.
 The right side is a live preview using generated mock signals. Drag a panel by
 its title and resize it using the lower-right handle. Placement and size are
 stored as percentages, so the composition scales with the monitor window.
 Numeric percentage controls and a per-panel automatic-layout reset are also
-available. **Fit to Screen** arranges all panels across the existing window and
+available. The designer supports traces, 2D planes, PSD plots, marker rolls, and
+active-state panels.
+
+**Fit to Screen** arranges all panels across the existing window and
 proportionally stretches the existing column widths, row heights, positions, and
 gaps until the layout reaches every window edge. Nested groups are fitted
 recursively, so a short row inside one column can fill that column without
-changing the proportions of neighboring columns. The designer supports traces,
-2D planes, PSD plots, and active-state panels.
+changing the proportions of neighboring columns.
 
 **Channel order** is set by dragging, at two levels:
 
@@ -83,116 +317,37 @@ preview-only and are not written to the configuration: the exported stream match
 fields and channel indices are used to connect the same layout to real LSL
 outlets later.
 
-To open an existing configuration in the designer:
+## Troubleshooting
 
-```powershell
-uv run lsl-monitor json/example.monitor.json --designer
-```
+**Panels never appear / streams stay red.** The dashboard is discovering but not
+receiving. Confirm the producer is actually pushing samples, then check that
+`match` agrees with what the outlet advertises — `identity` must appear in both
+the outlet `name` and its `source_id`. Widen the rule by dropping `type` to test.
 
-## Install
+**Same-PC streams are not found on Windows.** The repository-level
+[lsl_api.cfg](lsl_api.cfg) keeps LSL on IPv4 and adds the portable loopback
+address as a known peer, which makes same-PC demo outlets connect reliably while
+retaining normal multicast discovery for streams hosted by other PCs. **Run both
+the producer and the monitor from the repository root** so liblsl loads this
+configuration.
 
-Python 3.10 or newer is required. From the repository root:
+**The monitor asks which outlet to use.** Two or more outlets are equally close
+matches on different computers. Pick the one belonging to this experiment, or add
+`"hostname"` to that stream's `match` to make the choice automatic.
 
-```powershell
-uv sync --all-groups
-```
+**`Channel 'X' was not found`.** A `channels` entry used a metadata `name` the
+connected outlet does not advertise; the error lists the labels that are
+available. Either fix the spelling or select by `index` instead.
 
-This creates `.venv`, installs the application and development tools, and uses
-the committed `uv.lock` for reproducible versions. Activating the environment is
-optional because the commands below run through `uv`.
+**`Channel index N is outside connected stream`.** The configuration selects a
+higher index than the outlet has channels.
 
-## Configure
+**Config errors on startup.** Run with `--validate` for the full list; each line
+names the JSON path that failed.
 
-Copy [json/example.monitor.json](json/example.monitor.json), then edit its
-`streams`. The configuration contract is
-[schemas/lsl-monitor.schema.json](schemas/lsl-monitor.schema.json), a JSON Schema
-Draft 2020-12 document. Editors such as VS Code can use the `$schema` entry for
-completion and validation.
-
-Each stream has:
-
-- `id`: an internal dashboard identifier. It must be unique within this JSON
-  configuration, but it does not need to equal any LSL field.
-- `match`: one or more LSL outlet fields. `identity` is the shared value expected
-  in both the outlet's human-readable `name` and stable producer `source_id`; it
-  is independent of the dashboard `id`. It may be combined with `type` and an
-  optional `hostname`. If an outlet appends its computer name to its identity,
-  the monitor selects the closest suffix match automatically. When equally close
-  outlets exist on multiple computers, the running monitor asks which full
-  outlet belongs to this experiment; the JSON remains portable between
-  computers. Legacy configurations using separate `name`, `source_id`, or
-  `name_regex` rules remain supported.
-- `channels`: the relevant channels selected by zero-based `index` or exact LSL
-  metadata `name`. `label` and `color` customize display.
-- `views`: the panels for the stream. A view can select a subset by raw channel
-  index, metadata name, or configured display label. The order of `channels` is
-  the order the panel draws them in. Omitting `channels` uses every selected
-  channel, in the order they appear in the stream's `channels`.
-- `layout`: optional responsive `x`, `y`, `width`, and `height` fractions on a
-  freeform canvas. For example, `{"x": 0, "y": 0, "width": 0.7, "height": 1}`
-  gives a panel the left 70% of the window. Views without `layout` are arranged
-  automatically using `window.columns`.
-
-Useful window settings are `history_seconds`, `refresh_hz`, grid `columns`, and
-`inactive_after_seconds`. The last setting is evaluated against `pylsl.local_clock`
-and the inlet's time-corrected sample timestamp.
-
-Validate a file without connecting to LSL:
-
-```powershell
-uv run lsl-monitor json/example.monitor.json --validate
-```
-
-## Run
-
-Start the outlets first or later; the dashboard continues searching and connects
-when they appear:
-
-```powershell
-uv run lsl-monitor json/example.monitor.json
-```
-
-The process is a read-only LSL consumer. It does not create an outlet or write a
-recording. A stream is green only after samples arrive within
-`inactive_after_seconds`; merely discovering an outlet is not enough.
-
-The repository-level `lsl_api.cfg` keeps LSL on IPv4 and adds the portable
-loopback address as a known peer. This makes same-PC demo outlets connect
-reliably on Windows while retaining normal multicast discovery for streams
-hosted by other PCs. Run the producer and monitor from the repository root so
-liblsl loads this configuration.
-
-## Full experiment demo
-
-The repository includes a live mock producer for
-`json/experiment_monitor_full.json`. It publishes all eight outlets expected by
-that configuration: EMG, IMU, cursor position, three camera-health signals, and
-two marker streams.
-
-Start the mock experiment in one terminal:
-
-```powershell
-uv run lsl-monitor-demo
-```
-
-Then start the monitor in a second terminal:
-
-```powershell
-uv run lsl-monitor json/experiment_monitor_full.json
-```
-
-The traces and 2D cursor animate continuously, and both marker panels receive
-named events. By default camera 2 pauses for four seconds during every
-16-second cycle. Because the monitor marks a stream inactive after two seconds,
-its health panel turns red and then returns to green when samples resume. Run
-without simulated dropouts using:
-
-```powershell
-uv run lsl-monitor-demo --fault-cycle-seconds 0
-```
-
-For a timed smoke test, pass `--duration 10`. The equivalent checkout-local
-launcher is `uv run python scripts/run_mock_experiment.py`.
+**A stream flickers red.** `inactive_after_seconds` is shorter than the real gap
+between samples. Raise it for slow or bursty streams, such as low-rate cameras
+and marker outlets.
 
 ## Development
 
@@ -203,5 +358,5 @@ uv run ruff check .
 uv run pytest -q
 ```
 
-The LSL worker, configuration model, and buffer are independent of Qt so their
+The LSL worker, configuration model, and buffer are independent of Qt, so their
 behavior can be tested with fake stream objects and without live hardware.

@@ -1,0 +1,74 @@
+{
+  "$schema": "../schemas/lsl-monitor.schema.json",
+  "window": {
+    "title": "My LSL monitor",
+    "history_seconds": 10,
+    "refresh_hz": 20,
+    "columns": 2,
+    "inactive_after_seconds": 2,
+    "max_points_per_channel": 100000
+  },
+  "streams": [
+    {
+      "id": "mock_stream",
+      "match": {
+        "identity": "My stream",
+        "type": "Audio"
+      },
+      "channels": [
+        {
+          "index": 0,
+          "label": "Channel 1",
+          "color": "#5eead4"
+        },
+        {
+          "index": 1,
+          "label": "Channel 2",
+          "color": "#60a5fa"
+        }
+      ],
+      "views": [
+        {
+          "type": "traces",
+          "title": "Signal traces",
+          "channels": [
+            0,
+            1
+          ],
+          "alignment": "stacked",
+          "layout": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 0.4969,
+            "height": 1.0
+          }
+        },
+        {
+          "type": "alive",
+          "title": "Stream health",
+          "layout": {
+            "x": 0.5,
+            "y": 0.0,
+            "width": 0.5,
+            "height": 0.5
+          }
+        },
+        {
+          "type": "psd",
+          "title": "Power spectrum",
+          "channels": [
+            0,
+            1
+          ],
+          "fft_size": 1024,
+          "layout": {
+            "x": 0.5031,
+            "y": 0.5023,
+            "width": 0.4969,
+            "height": 0.4977
+          }
+        }
+      ]
+    }
+  ]
+}
