@@ -184,7 +184,15 @@
       "required": ["type"],
       "properties": {
         "type": {
-          "enum": ["traces", "plane_2d", "psd", "alive", "markers"]
+          "enum": [
+            "traces",
+            "plane_2d",
+            "psd",
+            "spectrogram",
+            "audio",
+            "alive",
+            "markers"
+          ]
         },
         "title": {
           "type": "string",
@@ -212,10 +220,12 @@
           "type": "integer",
           "minimum": 16,
           "maximum": 1048576,
-          "default": 1024
+          "default": 1024,
+          "description": "Samples per spectrum, used by the psd and spectrogram panels."
         },
         "frequency_range": {
           "type": "array",
+          "description": "Frequency axis limits of the psd and spectrogram panels, in Hz.",
           "prefixItems": [
             {
               "type": "number",
@@ -247,6 +257,43 @@
           "exclusiveMinimum": 0,
           "maximum": 3600,
           "description": "Trajectory length of the plane_2d panel; defaults to window.history_seconds."
+        },
+        "spectrogram_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 3600,
+          "description": "Time axis length of the spectrogram panel; defaults to window.history_seconds."
+        },
+        "dynamic_range_db": {
+          "type": "number",
+          "minimum": 6,
+          "maximum": 120,
+          "default": 60,
+          "description": "Decibels below the loudest bin that the spectrogram still colors."
+        },
+        "colormap": {
+          "enum": ["viridis", "magma", "inferno", "plasma", "cividis", "turbo"],
+          "default": "viridis",
+          "description": "Color map of the spectrogram panel."
+        },
+        "audio_gain": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100,
+          "default": 1,
+          "description": "Factor applied to the audio panel's meters and playback; 1 treats the samples as full scale."
+        },
+        "audio_muted": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open the audio panel muted; false starts playing as soon as samples arrive."
+        },
+        "level_seconds": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 10,
+          "default": 0.4,
+          "description": "History each audio level meter integrates over."
         },
         "layout": {
           "$ref": "#/$defs/panel_layout"

@@ -1,14 +1,21 @@
-"""PyQtGraph widgets for traces, phase planes, PSD, and connection health."""
+"""PyQtGraph widgets for traces, planes, spectra, audio, and connection health."""
 
 from __future__ import annotations
 
+import time
 from abc import abstractmethod
 
 import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from lsl_monitor.config import ConfigError, ViewConfig
+from lsl_monitor.audio import (
+    SILENCE_DECIBELS,
+    AudioOutput,
+    level_decibels,
+    samples_after,
+)
+from lsl_monitor.config import DEFAULT_COLORMAP, ConfigError, ViewConfig
 from lsl_monitor.model import StreamSnapshot
 
 BACKGROUND = "#101720"
@@ -23,6 +30,10 @@ RATE_WINDOW_SECONDS = 2.0
 # A channel that steps more often than this inside the marker window is a
 # continuous signal rather than a trigger line, so it contributes no markers.
 MAX_DERIVED_MARKERS = 200
+
+# Spectrogram columns are capped instead of the window: a fast stream would
+# otherwise cost one transform per pixel column of a plot nobody can read.
+MAX_SPECTROGRAM_COLUMNS = 400
 
 
 def _plot_color(snapshot: StreamSnapshot, position: int) -> str:
@@ -40,6 +51,70 @@ def _relative_time(snapshot: StreamSnapshot) -> np.ndarray:
     if snapshot.timestamps.size == 0:
         return snapshot.timestamps
     return snapshot.timestamps - snapshot.now_lsl_time
+
+
+def estimated_sample_rate(snapshot: StreamSnapshot) -> float:
+    """Return the rate implied by the timestamps, or the advertised one.
+
+    Spectra and playback both need the rate the samples actually arrived at,
+    which an outlet reporting an irregular rate never advertises.
+    """
+
+    if snapshot.timestamps.size > 2:
+        difference = np.diff(snapshot.timestamps[-min(1000, snapshot.timestamps.size) :])
+        difference = difference[np.isfinite(difference) & (difference > 0)]
+        if difference.size:
+            return 1.0 / float(np.median(difference))
+    return snapshot.nominal_srate
+
+
+def spectrogram_decibels(
+    values: np.ndarray,
+    sample_rate: float,
+    fft_size: int,
+    max_columns: int = MAX_SPECTROGRAM_COLUMNS,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return one short-time spectrum per column of a spectrogram.
+
+    The result is `(decibels, frequencies, times)`, where `decibels` is indexed
+    as `[column, frequency]` for a pyqtgraph image, and `times` are the column
+    centers in seconds relative to the newest sample, so they are all negative.
+    The hop grows with the sample count to keep the transform count bounded.
+    """
+
+    block = np.asarray(values, dtype=float)
+    empty = (np.empty((0, 0)), np.empty(0), np.empty(0))
+    size = min(int(fft_size), block.size)
+    if sample_rate <= 0.0 or size < 16:
+        return empty
+    size = 1 << (size.bit_length() - 1)
+    hop = max(size // 4, -(-(block.size - size + 1) // max(1, max_columns)))
+    frames = np.lib.stride_tricks.sliding_window_view(block, size)[::hop]
+    frames = np.nan_to_num(frames)
+    frames = frames - frames.mean(axis=1, keepdims=True)
+    window = np.hanning(size)
+    normalization = max(sample_rate * float(np.sum(window**2)), np.finfo(float).eps)
+    power = (np.abs(np.fft.rfft(frames * window, axis=1)) ** 2) / normalization
+    if size > 1:
+        power[:, 1:-1] *= 2.0
+    decibels = 10.0 * np.log10(np.maximum(power, np.finfo(float).tiny))
+    frequencies = np.fft.rfftfreq(size, d=1.0 / sample_rate)
+    centers = np.arange(frames.shape[0]) * hop + size / 2.0
+    times = (centers - (block.size - 1)) / sample_rate
+    return decibels, frequencies, times
+
+
+def spectrogram_colormap(name: str) -> pg.ColorMap:
+    """Return a named pyqtgraph color map, falling back to the default one."""
+
+    for candidate in (name, DEFAULT_COLORMAP):
+        try:
+            colormap = pg.colormap.get(candidate)
+        except (FileNotFoundError, KeyError, ValueError):
+            continue
+        if colormap is not None:
+            return colormap
+    return pg.ColorMap([0.0, 1.0], [BACKGROUND, FOREGROUND])
 
 
 def transmission_rate_text(snapshot: StreamSnapshot) -> str:
@@ -423,18 +498,9 @@ class PsdPanel(PlotPanel):
                 )
             )
 
-    @staticmethod
-    def _sample_rate(snapshot: StreamSnapshot) -> float:
-        if snapshot.timestamps.size > 2:
-            difference = np.diff(snapshot.timestamps[-min(1000, snapshot.timestamps.size) :])
-            difference = difference[np.isfinite(difference) & (difference > 0)]
-            if difference.size:
-                return 1.0 / float(np.median(difference))
-        return snapshot.nominal_srate
-
     def render_snapshot(self, snapshot: StreamSnapshot) -> None:
         self._ensure_curves(snapshot)
-        sample_rate = self._sample_rate(snapshot)
+        sample_rate = estimated_sample_rate(snapshot)
         if sample_rate <= 0:
             return
         maximum_size = min(self.view.fft_size, snapshot.samples.shape[1])
@@ -460,6 +526,344 @@ class PsdPanel(PlotPanel):
         else:
             self.plot.setXRange(0.0, maximum_frequency, padding=0)
         self.plot.enableAutoRange(axis="y", enable=True)
+
+
+class SpectrogramPanel(PlotPanel):
+    """Rolling short-time spectrum of one channel, drawn as a heat map.
+
+    A spectrogram reads one signal at a time, so the panel draws the first
+    channel it is given and names it under the plot.
+    """
+
+    def __init__(
+        self,
+        title: str,
+        view: ViewConfig,
+        positions: list[int],
+        history_seconds: float,
+    ) -> None:
+        super().__init__(title, view.status_dot)
+        self.view = view
+        self.positions = positions
+        self.window_seconds = view.spectrogram_window(history_seconds)
+        self.image = pg.ImageItem()
+        self.image.setColorMap(spectrogram_colormap(view.colormap))
+        self.plot.addItem(self.image)
+        self.plot.showGrid(x=False, y=False)
+        self.plot.setLabel("bottom", "LSL time relative to now", units="s")
+        self.plot.setLabel("left", "frequency", units="Hz")
+        self.plot.setMouseEnabled(x=False, y=False)
+        self.plot.hideButtons()
+        self.summary = QtWidgets.QLabel()
+        self.summary.setStyleSheet(f"color: {MUTED};")
+        self.layout.addWidget(self.summary)
+
+    def _frequency_limits(self, sample_rate: float) -> tuple[float, float]:
+        nyquist = sample_rate / 2.0
+        if self.view.frequency_range:
+            low, high = self.view.frequency_range
+            return low, min(high, nyquist)
+        return 0.0, nyquist
+
+    def render_snapshot(self, snapshot: StreamSnapshot) -> None:
+        if not self.positions:
+            return
+        position = self.positions[0]
+        label = snapshot.channel_labels[position]
+        sample_rate = estimated_sample_rate(snapshot)
+        relative = _relative_time(snapshot)
+        inside = relative >= -self.window_seconds
+        decibels, frequencies, times = spectrogram_decibels(
+            snapshot.samples[position][inside], sample_rate, self.view.fft_size
+        )
+        self.plot.setXRange(-self.window_seconds, 0.0, padding=0)
+        if decibels.size == 0:
+            self.summary.setText(f"{label} · waiting for {self.view.fft_size} samples")
+            return
+        # Column times are relative to the newest sample, which may itself be
+        # older than now while a stream is silent.
+        edge = float(relative[inside][-1])
+        loudest = float(np.max(decibels))
+        span = float(times[-1] - times[0]) if times.size > 1 else 1.0 / sample_rate
+        self.image.setImage(decibels, autoLevels=False)
+        self.image.setLevels((loudest - self.view.dynamic_range_db, loudest))
+        self.image.setRect(
+            QtCore.QRectF(
+                float(times[0]) + edge, 0.0, span, float(frequencies[-1])
+            )
+        )
+        low, high = self._frequency_limits(sample_rate)
+        self.plot.setYRange(low, high, padding=0)
+        self.summary.setText(
+            f"{label} · {times.size} spectra · peak {loudest:.0f} dB · "
+            f"{self.view.dynamic_range_db:g} dB range"
+        )
+
+
+class LevelMeter(QtWidgets.QWidget):
+    """Horizontal decibel bar with a decaying peak-hold tick."""
+
+    MINIMUM_DB = -60.0
+    MAXIMUM_DB = 6.0
+    #: How fast the peak tick falls back toward the current level.
+    PEAK_DECAY_DB_PER_SECOND = 20.0
+    TRACK = "#0a131d"
+    LOUD_DB = -12.0
+    CLIPPING_DB = -1.0
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setMinimumHeight(14)
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed
+        )
+        self.level_db = self.MINIMUM_DB
+        self.peak_db = self.MINIMUM_DB
+        self._peak_at = time.monotonic()
+
+    def set_level(self, level_db: float, peak_db: float) -> None:
+        """Show a level, holding the peak until it decays below the new one."""
+
+        now = time.monotonic()
+        decayed = self.peak_db - self.PEAK_DECAY_DB_PER_SECOND * (now - self._peak_at)
+        self._peak_at = now
+        self.level_db = level_db
+        self.peak_db = max(peak_db, decayed, self.MINIMUM_DB)
+        self.update()
+
+    def _fraction(self, decibels: float) -> float:
+        span = self.MAXIMUM_DB - self.MINIMUM_DB
+        return min(1.0, max(0.0, (decibels - self.MINIMUM_DB) / span))
+
+    def _color(self, decibels: float) -> QtGui.QColor:
+        if decibels >= self.CLIPPING_DB:
+            return QtGui.QColor(INACTIVE_DOT)
+        if decibels >= self.LOUD_DB:
+            return QtGui.QColor("#facc15")
+        return QtGui.QColor(ACTIVE_DOT)
+
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:
+        del event
+        painter = QtGui.QPainter(self)
+        area = self.rect().adjusted(0, 0, -1, -1)
+        painter.setPen(QtCore.Qt.PenStyle.NoPen)
+        painter.setBrush(QtGui.QColor(self.TRACK))
+        painter.drawRoundedRect(area, 3, 3)
+        filled = round(area.width() * self._fraction(self.level_db))
+        if filled > 0:
+            painter.setBrush(self._color(self.level_db))
+            painter.drawRoundedRect(area.adjusted(0, 0, filled - area.width(), 0), 3, 3)
+        peak = round(area.width() * self._fraction(self.peak_db))
+        if peak > 0:
+            painter.setPen(QtGui.QPen(QtGui.QColor(FOREGROUND), 2))
+            painter.drawLine(
+                area.left() + peak, area.top() + 1, area.left() + peak, area.bottom() - 1
+            )
+
+
+class AudioPanel(MonitorPanel):
+    """Level meters for the selected channels, with optional live playback.
+
+    The panel opens muted, so a dashboard never makes a sound until Listen is
+    pressed or the configuration asks for playback with `audio_muted: false`.
+    Metering works with or without an output device, and playback follows the
+    stream's own sample rate, resampled to whatever the sound card accepts.
+    """
+
+    def __init__(
+        self,
+        title: str,
+        view: ViewConfig,
+        positions: list[int],
+        output: AudioOutput | None = None,
+    ) -> None:
+        super().__init__(title, view.status_dot)
+        self.view = view
+        self.positions = positions
+        self.level_seconds = view.level_seconds
+        self.gain = view.audio_gain
+        self.output = output if output is not None else AudioOutput()
+        self.played_until: float | None = None
+        self.meters: list[LevelMeter] = []
+        self.readouts: list[QtWidgets.QLabel] = []
+        self.channel_names: list[QtWidgets.QLabel] = []
+        self._labels: tuple[str, ...] = ()
+        self._build_meters()
+        self._build_controls()
+        self.listen_check.setChecked(not view.audio_muted)
+
+    def _build_meters(self) -> None:
+        grid = QtWidgets.QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(3)
+        grid.setColumnStretch(1, 1)
+        for row, _ in enumerate(self.positions):
+            name = QtWidgets.QLabel()
+            name.setStyleSheet(f"color: {FOREGROUND};")
+            meter = LevelMeter()
+            readout = QtWidgets.QLabel()
+            readout.setStyleSheet(f"color: {MUTED};")
+            readout.setAlignment(
+                QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter
+            )
+            readout.setMinimumWidth(96)
+            grid.addWidget(name, row, 0)
+            grid.addWidget(meter, row, 1)
+            grid.addWidget(readout, row, 2)
+            self.channel_names.append(name)
+            self.meters.append(meter)
+            self.readouts.append(readout)
+        self.layout.addLayout(grid, 1)
+
+    def _build_controls(self) -> None:
+        controls = QtWidgets.QHBoxLayout()
+        controls.setSpacing(6)
+        self.listen_check = QtWidgets.QCheckBox("Listen")
+        self.listen_check.setToolTip(
+            "Play this stream through the sound card; metering runs either way"
+        )
+        self.listen_check.setEnabled(self.output.available)
+        self.listen_check.toggled.connect(self._listen_toggled)
+        self.channel_combo = QtWidgets.QComboBox()
+        self.channel_combo.setToolTip("Channel sent to the sound card")
+        self.channel_combo.currentIndexChanged.connect(self._playback_channel_changed)
+        self.gain_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.gain_slider.setRange(-24, 24)
+        self.gain_slider.setValue(round(_gain_decibels(self.gain)))
+        self.gain_slider.setToolTip("Gain applied to both the meters and playback")
+        self.gain_slider.valueChanged.connect(self._gain_changed)
+        self.gain_label = QtWidgets.QLabel()
+        self.gain_label.setStyleSheet(f"color: {MUTED};")
+        self.gain_label.setMinimumWidth(54)
+        controls.addWidget(self.listen_check)
+        controls.addWidget(self.channel_combo, 1)
+        controls.addWidget(self.gain_slider, 1)
+        controls.addWidget(self.gain_label)
+        self.layout.addLayout(controls)
+        self.status = QtWidgets.QLabel()
+        self.status.setStyleSheet(f"color: {MUTED};")
+        self.status.setWordWrap(True)
+        self.layout.addWidget(self.status)
+        self._update_gain_label()
+
+    @property
+    def muted(self) -> bool:
+        return not self.listen_check.isChecked()
+
+    @property
+    def playback_position(self) -> int:
+        """Position of the channel currently sent to the sound card."""
+
+        selected = self.channel_combo.currentData()
+        if selected is None:
+            return self.positions[0] if self.positions else 0
+        return int(selected)
+
+    @QtCore.Slot(bool)
+    def _listen_toggled(self, listening: bool) -> None:
+        if not listening:
+            # Releasing the device keeps a muted panel out of the way of other
+            # software, and drops whatever was still queued.
+            self.output.close()
+
+    @QtCore.Slot(int)
+    def _playback_channel_changed(self, index: int) -> None:
+        del index
+        # A new channel restarts at the live edge instead of replaying history.
+        self.played_until = None
+
+    @QtCore.Slot(int)
+    def _gain_changed(self, decibels: int) -> None:
+        self.gain = float(10.0 ** (decibels / 20.0))
+        self._update_gain_label()
+
+    def _update_gain_label(self) -> None:
+        self.gain_label.setText(f"{_gain_decibels(self.gain):+.0f} dB")
+
+    def _ensure_channels(self, snapshot: StreamSnapshot) -> None:
+        """Name every meter, and offer each channel for playback."""
+
+        labels = tuple(snapshot.channel_labels[position] for position in self.positions)
+        if labels == self._labels:
+            return
+        self._labels = labels
+        for name, label in zip(self.channel_names, labels, strict=True):
+            name.setText(label)
+        selected = self.channel_combo.currentData()
+        self.channel_combo.blockSignals(True)
+        self.channel_combo.clear()
+        for position, label in zip(self.positions, labels, strict=True):
+            self.channel_combo.addItem(label, position)
+        restored = self.channel_combo.findData(selected)
+        self.channel_combo.setCurrentIndex(max(0, restored))
+        self.channel_combo.blockSignals(False)
+
+    def _play(self, snapshot: StreamSnapshot) -> None:
+        """Queue the samples that arrived since the previous render."""
+
+        position = self.playback_position
+        if position >= snapshot.samples.shape[0]:
+            return
+        fresh, self.played_until = samples_after(
+            snapshot.timestamps, snapshot.samples[position], self.played_until
+        )
+        if self.muted or fresh.size == 0:
+            return
+        self.output.write(fresh * self.gain, estimated_sample_rate(snapshot))
+
+    def _status_text(self, snapshot: StreamSnapshot) -> str:
+        if not self.output.available:
+            return f"{self.output.description} · metering only"
+        if self.muted:
+            return f"Muted · {self.output.description}"
+        rate = self.output.output_rate
+        played = f"{rate / 1000.0:g} kHz out" if rate else "opening device"
+        source = estimated_sample_rate(snapshot)
+        arriving = f"{source:.0f} Hz in" if source > 0 else "unknown input rate"
+        dropped = self.output.dropped_samples
+        text = f"Listening · {arriving} · {played} · {self.output.description}"
+        return f"{text} · {dropped} samples dropped" if dropped else text
+
+    def render_snapshot(self, snapshot: StreamSnapshot) -> None:
+        self._ensure_channels(snapshot)
+        relative = _relative_time(snapshot)
+        inside = relative >= -self.level_seconds
+        for meter, readout, position in zip(
+            self.meters, self.readouts, self.positions, strict=True
+        ):
+            if position >= snapshot.samples.shape[0]:
+                continue
+            values = snapshot.samples[position][inside] * self.gain
+            rms, peak = level_decibels(values)
+            meter.set_level(rms, peak)
+            readout.setText(_level_text(rms, peak))
+        self._play(snapshot)
+        self.status.setText(self._status_text(snapshot))
+
+    def hideEvent(self, event: QtGui.QHideEvent) -> None:
+        """Release the device while the panel is off screen, and resume with it."""
+
+        self.output.close()
+        super().hideEvent(event)
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        self.output.close()
+        super().closeEvent(event)
+
+
+def _gain_decibels(gain: float) -> float:
+    """Return a linear gain as decibels, treating zero as full attenuation."""
+
+    return 20.0 * float(np.log10(gain)) if gain > 0.0 else -24.0
+
+
+def _level_text(rms_db: float, peak_db: float) -> str:
+    """Describe one meter's RMS and peak, or say that the channel is silent."""
+
+    if peak_db <= SILENCE_DECIBELS:
+        return "silent"
+    return f"{rms_db:5.1f} / {peak_db:5.1f} dB"
 
 
 class MarkerPanel(PlotPanel):
@@ -617,6 +1021,14 @@ def _build_panel(
         return PlanePanel(title, view, positions, history_seconds)
     if view.type == "psd":
         return PsdPanel(title, view, positions)
+    if view.type == "spectrogram":
+        if not positions:
+            raise ConfigError(f"{title!r}: spectrogram requires a channel")
+        return SpectrogramPanel(title, view, positions, history_seconds)
+    if view.type == "audio":
+        if not positions:
+            raise ConfigError(f"{title!r}: audio requires at least one channel")
+        return AudioPanel(title, view, positions)
     if view.type == "markers":
         return MarkerPanel(title, view, positions, view.marker_window(history_seconds))
     return AlivePanel(title, view)

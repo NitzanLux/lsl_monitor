@@ -15,6 +15,10 @@ import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from lsl_monitor.config import (
+    COLORMAPS,
+    DEFAULT_COLORMAP,
+    DEFAULT_DYNAMIC_RANGE_DB,
+    DEFAULT_LEVEL_SECONDS,
     DEFAULT_MARKER_LIMIT,
     ConfigError,
     MonitorConfig,
@@ -34,12 +38,14 @@ from lsl_monitor.views import DEFAULT_COLORS, MonitorPanel, TracePanel, create_p
 
 Document = dict[str, Any]
 
-VIEW_TYPES = ("traces", "plane_2d", "psd", "alive", "markers")
+VIEW_TYPES = ("traces", "plane_2d", "psd", "spectrogram", "audio", "alive", "markers")
 
 VIEW_TITLES = {
     "traces": "Signal traces",
     "plane_2d": "2D plane",
     "psd": "Power spectrum",
+    "spectrogram": "Spectrogram",
+    "audio": "Audio monitor",
     "alive": "Stream health",
     "markers": "Marker roll",
 }
@@ -49,6 +55,14 @@ VIEW_ARGUMENTS: dict[str, tuple[str, ...]] = {
     "traces": ("alignment",),
     "plane_2d": ("trail_seconds",),
     "psd": ("fft_size", "frequency_range"),
+    "spectrogram": (
+        "fft_size",
+        "frequency_range",
+        "spectrogram_seconds",
+        "dynamic_range_db",
+        "colormap",
+    ),
+    "audio": ("level_seconds", "audio_gain", "audio_muted"),
     "markers": ("marker_seconds", "marker_limit"),
     "alive": (),
 }
@@ -60,6 +74,15 @@ VIEW_ARGUMENT_HELP = {
     "traces": "Stacked lanes normalize each channel; overlay shares one axis.",
     "plane_2d": "The trail window is how much history the trajectory keeps.",
     "psd": "FFT size sets the resolution; the limit crops the frequency axis.",
+    "spectrogram": (
+        "The heat map draws the first selected channel. FFT size trades time "
+        "resolution for frequency resolution, and the dynamic range is measured "
+        "down from the loudest bin."
+    ),
+    "audio": (
+        "Meters read every selected channel; one of them is played, chosen in "
+        "the panel. Gain scales both, and playback starts muted unless asked."
+    ),
     "markers": "The roll window and row count decide how many credits stay on screen.",
     "alive": "The health panel is driven by the stream alone.",
 }
@@ -845,6 +868,41 @@ class DesignerWindow(QtWidgets.QMainWindow):
         self.fft_spin.setSingleStep(128)
         self.fft_spin.setToolTip("Samples per spectrum; larger windows resolve finer peaks")
         self.frequency_range_edit = FrequencyRangeEdit()
+        self.spectrogram_seconds_spin = self._seconds_spin(
+            "How much time the spectrogram scrolls through, independent of trace history"
+        )
+        self.dynamic_range_spin = QtWidgets.QDoubleSpinBox()
+        self.dynamic_range_spin.setRange(6.0, 120.0)
+        self.dynamic_range_spin.setDecimals(0)
+        self.dynamic_range_spin.setSingleStep(6.0)
+        self.dynamic_range_spin.setSuffix(" dB")
+        self.dynamic_range_spin.setToolTip(
+            "Decibels below the loudest bin that are still colored; smaller values "
+            "raise the contrast"
+        )
+        self.colormap_combo = QtWidgets.QComboBox()
+        self.colormap_combo.addItems(list(COLORMAPS))
+        self.colormap_combo.setToolTip("Color map used for the spectrogram heat map")
+        self.level_seconds_spin = QtWidgets.QDoubleSpinBox()
+        self.level_seconds_spin.setRange(0.05, 10.0)
+        self.level_seconds_spin.setDecimals(2)
+        self.level_seconds_spin.setSingleStep(0.05)
+        self.level_seconds_spin.setSuffix(" s")
+        self.level_seconds_spin.setToolTip(
+            "History each level meter integrates; short windows react faster"
+        )
+        self.audio_gain_spin = QtWidgets.QDoubleSpinBox()
+        self.audio_gain_spin.setRange(0.01, 100.0)
+        self.audio_gain_spin.setDecimals(2)
+        self.audio_gain_spin.setSingleStep(0.25)
+        self.audio_gain_spin.setPrefix("× ")
+        self.audio_gain_spin.setToolTip(
+            "Applied to the meters and to playback; 1 reads the samples as full scale"
+        )
+        self.audio_muted_check = QtWidgets.QCheckBox("Start muted")
+        self.audio_muted_check.setToolTip(
+            "Leave checked so opening the dashboard is silent until Listen is pressed"
+        )
         self.marker_seconds_spin = self._seconds_spin(
             "How far back the marker roll reaches, independent of trace history"
         )
@@ -863,6 +921,12 @@ class DesignerWindow(QtWidgets.QMainWindow):
             "trail_seconds": self.trail_seconds_spin,
             "fft_size": self.fft_spin,
             "frequency_range": self.frequency_range_edit,
+            "spectrogram_seconds": self.spectrogram_seconds_spin,
+            "dynamic_range_db": self.dynamic_range_spin,
+            "colormap": self.colormap_combo,
+            "level_seconds": self.level_seconds_spin,
+            "audio_gain": self.audio_gain_spin,
+            "audio_muted": self.audio_muted_check,
             "marker_seconds": self.marker_seconds_spin,
             "marker_limit": self.marker_limit_spin,
             "status_dot": self.status_dot_check,
@@ -872,6 +936,12 @@ class DesignerWindow(QtWidgets.QMainWindow):
             ("Trail window", "trail_seconds"),
             ("FFT size", "fft_size"),
             ("Frequency limit", "frequency_range"),
+            ("Time window", "spectrogram_seconds"),
+            ("Dynamic range", "dynamic_range_db"),
+            ("Color map", "colormap"),
+            ("Meter window", "level_seconds"),
+            ("Output gain", "audio_gain"),
+            ("Playback", "audio_muted"),
             ("Roll window", "marker_seconds"),
             ("Rows shown", "marker_limit"),
             ("Activity dot", "status_dot"),
@@ -889,6 +959,12 @@ class DesignerWindow(QtWidgets.QMainWindow):
         self.trail_seconds_spin.valueChanged.connect(self._view_changed)
         self.fft_spin.valueChanged.connect(self._view_changed)
         self.frequency_range_edit.changed.connect(self._view_changed)
+        self.spectrogram_seconds_spin.valueChanged.connect(self._view_changed)
+        self.dynamic_range_spin.valueChanged.connect(self._view_changed)
+        self.colormap_combo.currentTextChanged.connect(self._view_changed)
+        self.level_seconds_spin.valueChanged.connect(self._view_changed)
+        self.audio_gain_spin.valueChanged.connect(self._view_changed)
+        self.audio_muted_check.toggled.connect(self._view_changed)
         self.marker_seconds_spin.valueChanged.connect(self._view_changed)
         self.marker_limit_spin.valueChanged.connect(self._view_changed)
         self.status_dot_check.toggled.connect(self._view_changed)
@@ -1309,6 +1385,18 @@ class DesignerWindow(QtWidgets.QMainWindow):
         self.trail_seconds_spin.setValue(float(view.get("trail_seconds", history)))
         self.fft_spin.setValue(int(view.get("fft_size", 1024)))
         self.frequency_range_edit.set_value(view.get("frequency_range"))
+        self.spectrogram_seconds_spin.setValue(
+            float(view.get("spectrogram_seconds", history))
+        )
+        self.dynamic_range_spin.setValue(
+            float(view.get("dynamic_range_db", DEFAULT_DYNAMIC_RANGE_DB))
+        )
+        self.colormap_combo.setCurrentText(view.get("colormap", DEFAULT_COLORMAP))
+        self.level_seconds_spin.setValue(
+            float(view.get("level_seconds", DEFAULT_LEVEL_SECONDS))
+        )
+        self.audio_gain_spin.setValue(float(view.get("audio_gain", 1.0)))
+        self.audio_muted_check.setChecked(bool(view.get("audio_muted", True)))
         self.marker_seconds_spin.setValue(float(view.get("marker_seconds", history)))
         self.marker_limit_spin.setValue(
             int(view.get("marker_limit", DEFAULT_MARKER_LIMIT))
@@ -1508,6 +1596,13 @@ class DesignerWindow(QtWidgets.QMainWindow):
             "trail_seconds": self.trail_seconds_spin.value(),
             "fft_size": self.fft_spin.value(),
             "frequency_range": self.frequency_range_edit.value(),
+            "spectrogram_seconds": self.spectrogram_seconds_spin.value(),
+            "dynamic_range_db": self.dynamic_range_spin.value(),
+            "colormap": self.colormap_combo.currentText(),
+            "level_seconds": self.level_seconds_spin.value(),
+            "audio_gain": self.audio_gain_spin.value(),
+            # Panels open muted by default, so only playback is worth saving.
+            "audio_muted": False if not self.audio_muted_check.isChecked() else None,
             "marker_seconds": self.marker_seconds_spin.value(),
             "marker_limit": self.marker_limit_spin.value(),
             # The dot is on by default, so only its absence is worth saving.
@@ -1533,12 +1628,19 @@ class DesignerWindow(QtWidgets.QMainWindow):
                 self._message("Add at least two channels before creating a 2D plane.")
                 return
             view["channels"] = indices[:2]
+        elif view_type == "spectrogram":
+            # A heat map reads one signal, so it starts on the first channel.
+            view["channels"] = indices[:1]
         elif view_type != "alive":
             view["channels"] = indices
         if view_type == "traces":
             view["alignment"] = "stacked"
         if view_type == "psd":
             view["fft_size"] = 1024
+        if view_type == "spectrogram":
+            # Shorter windows than a PSD uses, because time is an axis here.
+            view["fft_size"] = 256
+            view["colormap"] = DEFAULT_COLORMAP
         stream["views"].append(view)
         self._loading = True
         self._rebuild_view_list(len(stream["views"]) - 1)

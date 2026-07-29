@@ -224,6 +224,20 @@ def monitor_config_from_document(
                     trail_seconds=(
                         float(trail_seconds) if trail_seconds is not None else None
                     ),
+                    spectrogram_seconds=(
+                        float(spectrogram_seconds)
+                        if spectrogram_seconds is not None
+                        else None
+                    ),
+                    dynamic_range_db=float(
+                        item.get("dynamic_range_db", DEFAULT_DYNAMIC_RANGE_DB)
+                    ),
+                    colormap=item.get("colormap", DEFAULT_COLORMAP),
+                    audio_gain=float(item.get("audio_gain", 1.0)),
+                    audio_muted=bool(item.get("audio_muted", True)),
+                    level_seconds=float(
+                        item.get("level_seconds", DEFAULT_LEVEL_SECONDS)
+                    ),
                     layout=PanelLayoutConfig(**layout) if layout else None,
                 )
             )
