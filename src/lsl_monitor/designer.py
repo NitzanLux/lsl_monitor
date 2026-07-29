@@ -34,7 +34,14 @@ from lsl_monitor.mock import (
     make_mock_snapshot,
     mock_model_label,
 )
-from lsl_monitor.views import DEFAULT_COLORS, MonitorPanel, TracePanel, create_panel
+from lsl_monitor.views import (
+    DEFAULT_COLORS,
+    MonitorPanel,
+    PsdPanel,
+    SpectrogramPanel,
+    TracePanel,
+    create_panel,
+)
 
 Document = dict[str, Any]
 
@@ -357,6 +364,7 @@ class DashboardPreview(QtWidgets.QFrame):
 
     panel_geometry_changed = QtCore.Signal(object, object)
     panel_channels_reordered = QtCore.Signal(object, object)
+    panel_frequency_range_changed = QtCore.Signal(object, object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -424,6 +432,17 @@ class DashboardPreview(QtWidgets.QFrame):
                     panel.channels_reordered.connect(
                         lambda order, path=(stream_index, view_index): (
                             self.panel_channels_reordered.emit(path, order)
+                        )
+                    )
+                if isinstance(panel, PsdPanel | SpectrogramPanel):
+                    # The panel already redrew itself, so the document only has
+                    # to record the band the preview is now showing.
+                    control = panel.frequency_control
+                    control.changed.connect(
+                        lambda control=control, path=(stream_index, view_index): (
+                            self.panel_frequency_range_changed.emit(
+                                path, control.limits
+                            )
                         )
                     )
                 rectangle = (
@@ -582,6 +601,9 @@ class DesignerWindow(QtWidgets.QMainWindow):
         self.preview = DashboardPreview()
         self.preview.panel_geometry_changed.connect(self._preview_geometry_changed)
         self.preview.panel_channels_reordered.connect(self._preview_channels_reordered)
+        self.preview.panel_frequency_range_changed.connect(
+            self._preview_frequency_range_changed
+        )
         preview_layout.addWidget(self.preview, 1)
         splitter.addWidget(preview_host)
         splitter.setStretchFactor(0, 0)
@@ -1255,6 +1277,28 @@ class DesignerWindow(QtWidgets.QMainWindow):
         if path == selected_path:
             self._load_view(view_index)
         self._schedule_preview()
+
+    @QtCore.Slot(object, object)
+    def _preview_frequency_range_changed(
+        self, path: tuple[int, int], limits: Sequence[float] | None
+    ) -> None:
+        """Store the frequency band set inside a preview panel.
+
+        The preview is not rebuilt: the panel is already drawing the new band,
+        and a rebuild would take the focus out of the control being used.
+        """
+
+        stream_index, view_index = path
+        view = self.document["streams"][stream_index]["views"][view_index]
+        if limits is None:
+            view.pop("frequency_range", None)
+        else:
+            view["frequency_range"] = [round(float(value), 1) for value in limits]
+        selected_path = (self.stream_combo.currentIndex(), self.view_list.currentRow())
+        if path == selected_path:
+            self._loading = True
+            self.frequency_range_edit.set_value(view.get("frequency_range"))
+            self._loading = False
 
     @QtCore.Slot()
     def _add_channel(self) -> None:

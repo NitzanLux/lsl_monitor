@@ -127,6 +127,8 @@ Set the panel kind with a view's `type`.
 | `traces` | Selected channels over time, as vertically normalized stacked lanes or raw overlays |
 | `plane_2d` | One channel against another as a fading trajectory; opacity increases toward the latest sample |
 | `psd` | A live windowed power spectral density |
+| `spectrogram` | One channel's short-time spectrum as a scrolling heat map: time across, frequency up |
+| `audio` | A level meter per selected channel, and playback of one of them through the sound card |
 | `alive` | A large green/red indicator with the age of the latest sample in LSL time |
 | `markers` | A rolling list of named events, newest first |
 
@@ -134,9 +136,42 @@ Trace lanes are individually normalized in `stacked` alignment, which keeps ever
 selected signal visible even when their amplitudes differ. `overlay` draws them
 together in raw units.
 
+`psd` and `spectrogram` panels carry a frequency range under the plot, so a band
+can be narrowed while the recording runs; `Full band` gives the axis back to the
+stream. A stream carries nothing above half its sample rate, so the boxes stop
+there and a wider request is pulled back to it. `frequency_range` sets the band a
+panel opens on, and in the designer the two are the same value: changing one
+updates the other.
+
+A `spectrogram` reads one signal at a time: it draws the first channel it is
+given and names it under the plot, so select that channel with `channels`.
+`fft_size` trades time resolution for frequency resolution, and
+`dynamic_range_db` is measured down from the loudest bin in view, so lowering it
+raises the contrast.
+
 `markers` panels prefer real marker samples (string-format outlets); for a
 numeric stream they fall back to reading steps to a non-zero value on the
 selected trigger channel, so a hardware trigger line can be read as events.
+
+### Listening to a stream
+
+An `audio` panel meters every channel it is given — RMS and peak in decibels of
+full scale, with a peak that holds and decays — and plays one of them, picked in
+the panel. Samples are treated as full scale at ±1, so `audio_gain` scales both
+the meters and the output; anything past full scale is clipped and the bar turns
+red.
+
+Playback opens **muted**: press `Listen`, or set `"audio_muted": false` to start
+with the dashboard. The samples are played at the rate they arrive at, resampled
+to whatever the sound card accepts, so a real `Audio` outlet sounds like itself.
+A low-rate signal such as EMG at 200 Hz is mostly below hearing, and its meter
+still works. Whatever cannot be queued in time is dropped rather than delayed,
+which keeps what is heard in step with what the panels draw; the panel reports
+the count. Metering runs with or without an output device, and a machine with no
+sound card says so instead of failing.
+
+Playing a stream reads the same samples the plots use — the monitor still creates
+no outlet and writes no recording.
 
 Every panel header carries the stream's activity dot, the panel title (the view
 type unless `title` overrides it), and the configured stream `id`, so each plot
@@ -227,9 +262,15 @@ apply everywhere.
 | `status_dot` | all | `true` | Show the green/red activity dot in the title row |
 | `layout` | all | auto grid | Responsive rectangle, see below |
 | `alignment` | `traces` | `"stacked"` | `stacked` (per-lane normalized) or `overlay` (raw units) |
-| `fft_size` | `psd` | `1024` | FFT window length, `16`–`1048576` |
-| `frequency_range` | `psd` | full band | `[low, high]` in Hz; `high` must exceed `low` |
+| `fft_size` | `psd`, `spectrogram` | `1024` | FFT window length, `16`–`1048576` |
+| `frequency_range` | `psd`, `spectrogram` | full band | `[low, high]` in Hz; `high` must exceed `low` |
 | `trail_seconds` | `plane_2d` | `history_seconds` | Trajectory length |
+| `spectrogram_seconds` | `spectrogram` | `history_seconds` | Time axis length |
+| `dynamic_range_db` | `spectrogram` | `60` | Decibels below the loudest bin that are still colored, `6`–`120` |
+| `colormap` | `spectrogram` | `"viridis"` | `viridis`, `magma`, `inferno`, `plasma`, `cividis`, or `turbo` |
+| `audio_gain` | `audio` | `1` | Factor applied to the meters and to playback, `0`–`100` |
+| `audio_muted` | `audio` | `true` | Open muted; `false` plays as soon as samples arrive |
+| `level_seconds` | `audio` | `0.4` | History each level meter integrates, `0.05`–`10` |
 | `marker_seconds` | `markers` | `history_seconds` | Rolling window length |
 | `marker_limit` | `markers` | `48` | Rows drawn; older events are counted only, `1`–`500` |
 
@@ -268,8 +309,11 @@ The right side is a live preview using generated mock signals. Drag a panel by
 its title and resize it using the lower-right handle. Placement and size are
 stored as percentages, so the composition scales with the monitor window.
 Numeric percentage controls and a per-panel automatic-layout reset are also
-available. The designer supports traces, 2D planes, PSD plots, marker rolls, and
-active-state panels.
+available. The designer supports traces, 2D planes, PSD plots, spectrograms,
+audio monitors, marker rolls, and active-state panels. Panel arguments appear
+for the type that uses them, and the preview panels themselves stay live: the
+frequency range set inside a `psd` or `spectrogram` preview is written back to
+the configuration, and audio previews stay muted until asked otherwise.
 
 **Fit to Screen** arranges all panels across the existing window and
 proportionally stretches the existing column widths, row heights, positions, and

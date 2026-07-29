@@ -18,7 +18,7 @@ from lsl_monitor.designer import (
     save_document,
 )
 from lsl_monitor.mock import DEFAULT_MOCK_MODEL, make_mock_snapshot
-from lsl_monitor.views import AudioPanel, SpectrogramPanel, TracePanel
+from lsl_monitor.views import AudioPanel, PsdPanel, SpectrogramPanel, TracePanel
 
 
 def test_starter_document_is_valid_and_mockable() -> None:
@@ -238,6 +238,33 @@ def test_designer_adds_a_muted_audio_panel() -> None:
     window.audio_muted_check.setChecked(False)
     application.processEvents()
     assert window.document["streams"][0]["views"][-1]["audio_muted"] is False
+    window.close()
+
+
+def test_changing_a_preview_frequency_band_updates_the_document_and_the_form() -> None:
+    application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    document = new_document()
+    document["streams"][0]["views"].append({"type": "psd", "title": "Power spectrum"})
+    window = DesignerWindow(document)
+    window.show()
+    application.processEvents()
+
+    panel = window.preview.panels[-1][0]
+    assert isinstance(panel, PsdPanel)
+    window.view_list.setCurrentRow(2)
+    panel.frequency_control.high.setValue(35.0)
+    application.processEvents()
+
+    view = window.document["streams"][0]["views"][2]
+    assert view["frequency_range"] == [0.0, 35.0]
+    assert window.frequency_range_edit.value() == (0.0, 35.0)
+    assert panel.plot.viewRange()[0] == pytest.approx([0.0, 35.0], abs=0.01)
+
+    panel.frequency_control.full_button.click()
+    application.processEvents()
+
+    assert "frequency_range" not in view, "the full band is the absence of a limit"
+    assert window.frequency_range_edit.value() is None
     window.close()
 
 

@@ -551,42 +551,53 @@ class FrequencyRangeControl(QtWidgets.QWidget):
         self.limits = None
         self.changed.emit()
 
-    def follow(self, nyquist: float) -> None:
-        """Track the stream's full band while no explicit limits are set."""
+    def apply(self, nyquist: float) -> tuple[float, float]:
+        """Return the bounds to draw, and show what the stream can deliver.
 
-        if self.limits is None and nyquist > 0.0:
-            self._show(0.0, nyquist)
+        A stream carries nothing above half its sample rate, so the spin boxes
+        stop there and a wider request is pulled back to it. Whatever the axis
+        ends up being is what the boxes read, so a request that could not be
+        honored is visible instead of silently ignored.
+        """
 
-    def effective(self, nyquist: float) -> tuple[float, float]:
-        """Return the bounds to draw, never reaching past Nyquist."""
-
+        if nyquist > 0.0:
+            for spin in (self.low, self.high):
+                spin.blockSignals(True)
+                spin.setMaximum(nyquist)
+                spin.blockSignals(False)
         if self.limits is None:
+            self._show(0.0, nyquist)
             return 0.0, nyquist
         low, high = self.limits
-        return low, min(high, nyquist) if nyquist > 0.0 else high
+        if nyquist > 0.0:
+            high = min(high, nyquist)
+            low = min(low, max(0.0, high - 1.0))
+            self.limits = (low, high)
+        self._show(low, high)
+        return low, high
 
 
 class PsdPanel(PlotPanel):
     """Windowed single-sided power spectral density."""
 
-    def __init__(
-        self,
-        title: str,
-        view: ViewConfig,
-        positions: list[int],
-        editable: bool = False,
-    ) -> None:
+    def __init__(self, title: str, view: ViewConfig, positions: list[int]) -> None:
         super().__init__(title, view.status_dot)
         self.view = view
         self.positions = positions
         self.curves: list[pg.PlotDataItem] = []
         self.plot.setLabel("bottom", "frequency", units="Hz")
         self.plot.setLabel("left", "PSD", units="dB/Hz")
+        self.nyquist = 0.0
         self.frequency_control = FrequencyRangeControl(view.frequency_range)
-        # The designer edits the same bounds in its form and rebuilds the preview
-        # on every keystroke, which would throw an in-panel edit away.
-        self.frequency_control.setVisible(not editable)
+        # The axis follows the control at once, rather than at the next redraw,
+        # so a band set on a slow or stalled stream still lands immediately.
+        self.frequency_control.changed.connect(self._show_frequency_range)
         self.layout.addWidget(self.frequency_control)
+
+    @QtCore.Slot()
+    def _show_frequency_range(self) -> None:
+        low, high = self.frequency_control.apply(self.nyquist)
+        self.plot.setXRange(low, high, padding=0)
 
     def _ensure_curves(self, snapshot: StreamSnapshot) -> None:
         while len(self.curves) < len(self.positions):
@@ -619,10 +630,8 @@ class PsdPanel(PlotPanel):
                 psd[1:-1] *= 2.0
             decibels = 10.0 * np.log10(np.maximum(psd, np.finfo(float).tiny))
             curve.setData(frequencies, decibels)
-        maximum_frequency = sample_rate / 2.0
-        self.frequency_control.follow(maximum_frequency)
-        low, high = self.frequency_control.effective(maximum_frequency)
-        self.plot.setXRange(low, high, padding=0)
+        self.nyquist = sample_rate / 2.0
+        self._show_frequency_range()
         self.plot.enableAutoRange(axis="y", enable=True)
 
 
@@ -639,7 +648,6 @@ class SpectrogramPanel(PlotPanel):
         view: ViewConfig,
         positions: list[int],
         history_seconds: float,
-        editable: bool = False,
     ) -> None:
         super().__init__(title, view.status_dot)
         self.view = view
@@ -656,10 +664,15 @@ class SpectrogramPanel(PlotPanel):
         self.summary = QtWidgets.QLabel()
         self.summary.setStyleSheet(f"color: {MUTED};")
         self.layout.addWidget(self.summary)
+        self.nyquist = 0.0
         self.frequency_control = FrequencyRangeControl(view.frequency_range)
-        # As for the PSD panel, the designer owns these bounds in its own form.
-        self.frequency_control.setVisible(not editable)
+        self.frequency_control.changed.connect(self._show_frequency_range)
         self.layout.addWidget(self.frequency_control)
+
+    @QtCore.Slot()
+    def _show_frequency_range(self) -> None:
+        low, high = self.frequency_control.apply(self.nyquist)
+        self.plot.setYRange(low, high, padding=0)
 
     def render_snapshot(self, snapshot: StreamSnapshot) -> None:
         if not self.positions:
@@ -667,6 +680,8 @@ class SpectrogramPanel(PlotPanel):
         position = self.positions[0]
         label = snapshot.channel_labels[position]
         sample_rate = estimated_sample_rate(snapshot)
+        self.nyquist = sample_rate / 2.0
+        self._show_frequency_range()
         relative = _relative_time(snapshot)
         inside = relative >= -self.window_seconds
         decibels, frequencies, times = spectrogram_decibels(
@@ -691,10 +706,6 @@ class SpectrogramPanel(PlotPanel):
                 float(frequencies[-1]),
             )
         )
-        nyquist = sample_rate / 2.0
-        self.frequency_control.follow(nyquist)
-        low, high = self.frequency_control.effective(nyquist)
-        self.plot.setYRange(low, high, padding=0)
         self.summary.setText(
             f"{label} · {times.size} spectra · peak {loudest:.0f} dB · "
             f"{self.view.dynamic_range_db:g} dB range"
@@ -715,8 +726,12 @@ class LevelMeter(QtWidgets.QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setMinimumHeight(14)
+        # Bars share the panel height like a mixer, but stop before they turn
+        # into blocks when only one or two channels are metered.
+        self.setMaximumHeight(26)
         self.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
         )
         self.level_db = self.MINIMUM_DB
         self.peak_db = self.MINIMUM_DB
@@ -812,6 +827,7 @@ class AudioPanel(MonitorPanel):
             grid.addWidget(name, row, 0)
             grid.addWidget(meter, row, 1)
             grid.addWidget(readout, row, 2)
+            grid.setRowStretch(row, 1)
             self.channel_names.append(name)
             self.meters.append(meter)
             self.readouts.append(readout)
@@ -1121,13 +1137,11 @@ def _build_panel(
             raise ConfigError(f"{title!r}: plane_2d requires exactly 2 channels")
         return PlanePanel(title, view, positions, history_seconds)
     if view.type == "psd":
-        return PsdPanel(title, view, positions, editable=editable)
+        return PsdPanel(title, view, positions)
     if view.type == "spectrogram":
         if not positions:
             raise ConfigError(f"{title!r}: spectrogram requires a channel")
-        return SpectrogramPanel(
-            title, view, positions, history_seconds, editable=editable
-        )
+        return SpectrogramPanel(title, view, positions, history_seconds)
     if view.type == "audio":
         if not positions:
             raise ConfigError(f"{title!r}: audio requires at least one channel")

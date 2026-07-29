@@ -262,14 +262,19 @@ def test_configured_frequency_range_is_the_starting_point_of_the_control() -> No
     panel.close()
 
 
-def test_the_designer_preview_leaves_frequency_bounds_to_its_own_form() -> None:
+def test_a_band_wider_than_the_stream_snaps_back_to_what_it_carries() -> None:
     QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    view = ViewConfig(type="psd", fft_size=256, frequency_range=(0.0, 8000.0))
 
-    panel = create_panel(
-        "psd", ViewConfig(type="psd"), [0, 1], 10.0, editable=True, stream_id="emg"
-    )
+    panel = PsdPanel("psd", view, [0])
+    panel.update_snapshot(make_snapshot())
 
-    assert not panel.frequency_control.isVisibleTo(panel)
+    # The 100 Hz test stream stops at 50 Hz, and the control has to say so
+    # instead of leaving 8000 Hz on screen next to an unchanged axis.
+    assert panel.frequency_control.limits == pytest.approx((0.0, 50.0), abs=0.1)
+    assert panel.frequency_control.high.value() == pytest.approx(50.0, abs=0.1)
+    assert panel.frequency_control.high.maximum() == pytest.approx(50.0, abs=0.1)
+    assert panel.plot.viewRange()[0][1] == pytest.approx(50.0, abs=0.1)
     panel.close()
 
 
