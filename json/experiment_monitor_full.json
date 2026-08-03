@@ -12,8 +12,8 @@
     {
       "id": "XtrodesEMG",
       "match": {
-        "identity": "XtrodesEMG",
-        "type": "Signals"
+        "name": "XtrodesEMG",
+        "type": "EMG"
       },
       "channels": [
         {
@@ -132,8 +132,8 @@
     {
       "id": "XtrodesIMU",
       "match": {
-        "identity": "XtrodesIMU",
-        "type": "Markers"
+        "name": "XtrodesIMU",
+        "type": "IMU"
       },
       "channels": [
         {
@@ -184,8 +184,8 @@
     {
       "id": "MotorControlCursor",
       "match": {
-        "identity": "MotorControlCursor",
-        "type": "MotorControlCursor"
+        "name": "MotorControlCursor",
+        "type": "MotorControl"
       },
       "channels": [
         {
@@ -215,8 +215,8 @@
     {
       "id": "FemtoBolt_cam0_CL8E751007P",
       "match": {
-        "identity": "FemtoBolt_cam0_CL8E751007P",
-        "type": "FemtoBolt_cam0_CL8E751007P"
+        "name": "FemtoBolt_cam0_CL8E751007P",
+        "type": "FrameSync"
       },
       "channels": [
         {
@@ -241,8 +241,8 @@
     {
       "id": "FemtoBolt_cam2_CL8E751008M",
       "match": {
-        "identity": "FemtoBolt_cam2_CL8E751008M",
-        "type": "Control"
+        "name": "FemtoBolt_cam2_CL8E751008M",
+        "type": "FrameSync"
       },
       "channels": [
         {
@@ -267,8 +267,8 @@
     {
       "id": "FemtoBolt_cam1_CL8E7510041",
       "match": {
-        "identity": "FemtoBolt_cam1_CL8E7510041",
-        "type": "FemtoBolt_cam1_CL8E7510041"
+        "name": "FemtoBolt_cam1_CL8E7510041",
+        "type": "FrameSync"
       },
       "channels": [
         {
@@ -293,7 +293,7 @@
     {
       "id": "MotorControlMarker",
       "match": {
-        "identity": "MotorControlMarker",
+        "name": "MotorControlMarkers",
         "type": "Markers"
       },
       "channels": [
@@ -322,7 +322,7 @@
     {
       "id": "FemtoBoltEvents",
       "match": {
-        "identity": "FemtoBoltEvents",
+        "name": "FemtoBoltEvents",
         "type": "Markers"
       },
       "channels": [
