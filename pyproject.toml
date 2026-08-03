@@ -13,7 +13,7 @@ dependencies = [
   "numpy>=1.26",
   "pylsl>=1.16",
   "pyqtgraph>=0.13.7",
-  "PySide6>=6.7",
+  "PySide6>=6.7,<6.8",
 ]
 
 [dependency-groups]
