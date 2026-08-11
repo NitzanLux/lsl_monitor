@@ -104,7 +104,7 @@
             "x": 0.0,
             "y": 0.0,
             "width": 0.6941,
-            "height": 0.5696
+            "height": 0.48
           },
           "title": "Signal traces",
           "alignment": "stacked",
@@ -174,9 +174,9 @@
           "alignment": "stacked",
           "layout": {
             "x": 0.0,
-            "y": 0.5654,
+            "y": 0.4842,
             "width": 0.6941,
-            "height": 0.2145
+            "height": 0.1479
           }
         }
       ]
@@ -207,7 +207,7 @@
             "x": 0.6941,
             "y": 0.0,
             "width": 0.3059,
-            "height": 0.3341
+            "height": 0.26
           }
         }
       ]
@@ -312,9 +312,9 @@
           ],
           "layout": {
             "x": 0.6941,
-            "y": 0.3364,
+            "y": 0.7242,
             "width": 0.3059,
-            "height": 0.4005
+            "height": 0.1358
           }
         }
       ]
@@ -341,9 +341,103 @@
           ],
           "layout": {
             "x": 0.6941,
-            "y": 0.7368,
+            "y": 0.8642,
             "width": 0.3059,
-            "height": 0.2632
+            "height": 0.1358
+          }
+        }
+      ]
+    },
+    {
+      "id": "ExperimentAnnotations",
+      "match": {
+        "name": "ExperimentAnnotations",
+        "type": "Markers"
+      },
+      "channels": [
+        {
+          "index": 0,
+          "label": "Annotation",
+          "color": "#5eead4"
+        }
+      ],
+      "views": [
+        {
+          "type": "markers",
+          "title": "Experiment annotations",
+          "channels": [
+            0
+          ],
+          "layout": {
+            "x": 0.6941,
+            "y": 0.2642,
+            "width": 0.3059,
+            "height": 0.2958
+          }
+        }
+      ]
+    },
+    {
+      "id": "MotorControlMouseButtons",
+      "match": {
+        "name": "MotorControlMouseButtons",
+        "type": "Markers"
+      },
+      "channels": [
+        {
+          "index": 0,
+          "label": "MouseButtonEvent",
+          "color": "#f472b6"
+        }
+      ],
+      "views": [
+        {
+          "type": "markers",
+          "title": "Mouse buttons",
+          "channels": [
+            0
+          ],
+          "layout": {
+            "x": 0.6941,
+            "y": 0.5642,
+            "width": 0.3059,
+            "height": 0.1558
+          }
+        }
+      ]
+    },
+    {
+      "id": "MotorControlMouseWheel",
+      "match": {
+        "name": "MotorControlMouseWheel",
+        "type": "MouseWheel"
+      },
+      "channels": [
+        {
+          "index": 0,
+          "label": "Wheel X",
+          "color": "#c084fc"
+        },
+        {
+          "index": 1,
+          "label": "Wheel Y",
+          "color": "#fb923c"
+        }
+      ],
+      "views": [
+        {
+          "type": "traces",
+          "title": "Mouse wheel",
+          "alignment": "stacked",
+          "channels": [
+            0,
+            1
+          ],
+          "layout": {
+            "x": 0.0,
+            "y": 0.6363,
+            "width": 0.6941,
+            "height": 0.1342
           }
         }
       ]

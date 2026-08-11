@@ -9,3 +9,15 @@ build/
 .env
 recordings/
 
+# Local monitor configs stay out of git. Every JSON is ignored by default;
+# the ones already committed are re-included by name, so a new config is
+# untracked until it is added here deliberately.
+*.json
+!.vscode/settings.json
+!schemas/lsl-monitor.schema.json
+!json/example.monitor.json
+!json/experiment_monitor.json
+!json/experiment_monitor.monitor.json
+!json/experiment_monitor_full.json
+
+
